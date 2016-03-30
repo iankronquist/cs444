@@ -34,7 +34,7 @@ void *producer() {
         unsigned int sleep_length = get_random_period() % 10;
 
 #ifdef DEBUG
-    fprintf(stderr, "Producer sleeping for %u\n", sleep_length);
+        fprintf(stderr, "Producer sleeping for %u\n", sleep_length);
 #endif
         (void)sleep(sleep_length);
 
@@ -56,7 +56,7 @@ void *producer() {
         Buffer[BufferFill] = born;
 
 #ifdef DEBUG
-    fprintf(stderr, "Producing value %zu\n", BufferFill);
+        fprintf(stderr, "Producing value %zu\n", BufferFill);
 #endif
         // Indicate the item has been produced
         BufferFill++;
@@ -78,10 +78,11 @@ void *consumer() {
         // Now that the lock has been acquired and we know there is at least 1
         // item in the buffer consume the last item.
         BufferFill--;
-        size_t current_buffer_fill = BufferFill;
 
 #ifdef DEBUG
-    fprintf(stderr, "Start consuming value %zu\n", current_buffer_fill);
+        size_t current_buffer_fill = BufferFill;
+
+        fprintf(stderr, "Start consuming value %zu\n", current_buffer_fill);
 #endif
 
         struct item eaten = Buffer[BufferFill];
@@ -91,13 +92,13 @@ void *consumer() {
 
         // Sleep for the amount of time indicated in the item.
 #ifdef DEBUG
-    fprintf(stderr, "Consumer sleeping for %u\n", eaten.wait_period);
+        fprintf(stderr, "Consumer sleeping for %u\n", eaten.wait_period);
 #endif
         (void)sleep(eaten.wait_period);
         printf("%d\n", eaten.value);
 
 #ifdef DEBUG
-    fprintf(stderr, "Finish consuming value %zu\n", current_buffer_fill);
+        fprintf(stderr, "Finish consuming value %zu\n", current_buffer_fill);
 #endif
 
     }
