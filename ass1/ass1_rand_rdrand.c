@@ -15,7 +15,7 @@ unsigned int get_random_waiting_period() {
 }
 
 int get_random_number() {
-    unsigned int rdrand
-    volatile __asm__( "rdrand %0" : "=r" (rdrand) );
+    unsigned int rdrand;
+    __asm__ volatile ( "rdrand %0" : "=r" (rdrand) );
     return rdrand;
 }
