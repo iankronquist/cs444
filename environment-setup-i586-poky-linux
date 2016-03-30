@@ -1,0 +1,45 @@
+export SDKTARGETSYSROOT=/scratch/opt/sysroots/i586-poky-linux
+export PATH=/scratch/opt/sysroots/x86_64-pokysdk-linux/usr/bin:/scratch/opt/sysroots/x86_64-pokysdk-linux/usr/bin/i586-poky-linux:$PATH
+export PKG_CONFIG_SYSROOT_DIR=$SDKTARGETSYSROOT
+export PKG_CONFIG_PATH=$SDKTARGETSYSROOT/usr/lib/pkgconfig
+export CONFIG_SITE=/scratch/opt/site-config-i586-poky-linux
+export OECORE_NATIVE_SYSROOT="/scratch/opt/sysroots/x86_64-pokysdk-linux"
+export OECORE_TARGET_SYSROOT="$SDKTARGETSYSROOT"
+export OECORE_ACLOCAL_OPTS="-I /scratch/opt/sysroots/x86_64-pokysdk-linux/usr/share/aclocal"
+export PYTHONHOME=/scratch/opt/sysroots/x86_64-pokysdk-linux/usr
+export CC="i586-poky-linux-gcc  -m32 -march=i586 --sysroot=$SDKTARGETSYSROOT"
+export CXX="i586-poky-linux-g++  -m32 -march=i586 --sysroot=$SDKTARGETSYSROOT"
+export CPP="i586-poky-linux-gcc -E  -m32 -march=i586 --sysroot=$SDKTARGETSYSROOT"
+export AS="i586-poky-linux-as  "
+export LD="i586-poky-linux-ld   --sysroot=$SDKTARGETSYSROOT"
+export GDB=i586-poky-linux-gdb
+export STRIP=i586-poky-linux-strip
+export RANLIB=i586-poky-linux-ranlib
+export OBJCOPY=i586-poky-linux-objcopy
+export OBJDUMP=i586-poky-linux-objdump
+export AR=i586-poky-linux-ar
+export NM=i586-poky-linux-nm
+export M4=m4
+export TARGET_PREFIX=i586-poky-linux-
+export CONFIGURE_FLAGS="--target=i586-poky-linux --host=i586-poky-linux --build=x86_64-linux --with-libtool-sysroot=$SDKTARGETSYSROOT"
+export CFLAGS=" -O2 -pipe -g -feliminate-unused-debug-types"
+export CXXFLAGS=" -O2 -pipe -g -feliminate-unused-debug-types"
+export LDFLAGS="-Wl,-O1 -Wl,--hash-style=gnu -Wl,--as-needed"
+export CPPFLAGS=""
+export KCFLAGS="--sysroot=$SDKTARGETSYSROOT"
+export OECORE_DISTRO_VERSION="1.7.1"
+export OECORE_SDK_VERSION="1.7.1"
+export ARCH=x86
+export CROSS_COMPILE=i586-poky-linux-
+
+# Append environment subscripts
+if [ -d "$OECORE_TARGET_SYSROOT/environment-setup.d" ]; then
+    for envfile in $OECORE_TARGET_SYSROOT/environment-setup.d/*.sh; do
+	    source $envfile
+    done
+fi
+if [ -d "$OECORE_NATIVE_SYSROOT/environment-setup.d" ]; then
+    for envfile in $OECORE_NATIVE_SYSROOT/environment-setup.d/*.sh; do
+	    source $envfile
+    done
+fi
