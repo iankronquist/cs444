@@ -24,7 +24,7 @@ struct item {
     unsigned int wait_period;
 };
 
-struct item Buffer[BUFFER_SIZE] = {0};
+struct item Buffer[BUFFER_SIZE];
 size_t BufferFill = 0;
 pthread_mutex_t BufferLock = PTHREAD_MUTEX_INITIALIZER;
 
