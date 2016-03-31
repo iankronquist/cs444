@@ -1,0 +1,212 @@
+\documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{anysize}
+\usepackage[backend=bibtex]{biblatex}
+\usepackage{amsmath}
+\marginsize{2cm}{2cm}{2cm}{2cm}
+\addbibresource{bib.bib}
+
+
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Oregon State University \par}
+    \vspace{1cm}
+    {\scshape\Large CS 444 Operating Systems II\par}
+    \vspace{1.5cm}
+    {\huge\bfseries Assignment I: Getting Acquainted\par}
+    \vspace{2cm}
+    {\Large\itshape Ian Kronquist\par}
+    \vfill
+    \par
+    Professor~Kevin \textsc{McGrath}
+
+    \vfill
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
+
+%\begin{titlepage}
+%\title{Project 1: Getting Acquainted}
+%    \vspace*{4cm}
+%    \begin{flushright}
+%    {\huge
+%    }
+%    \bigskip
+%    \bigskip
+%    \bigskip
+%    {\large
+%        CS 444,\\
+%        Sprint 2016
+%    }
+%    \end{flushright}
+%    \begin{flushleft}
+%    \end{flushleft}
+%    \begin{flushright}
+%    Ian Kronquist
+%    \end{flushright}
+%
+%\end{titlepage}
+
+
+
+
+
+% author names and affiliations
+% use a multiple column layout for up to three different
+% affiliations
+\author{\IEEEauthorblockN{Ian Kronquist}
+\IEEEauthorblockA{School of Electrical and\\Computer Science\\
+Oregon State University\\
+Corvallis, Oregon\\
+kronquii@oregonstate.edu}}
+
+% make the title area
+%\maketitle
+
+\begin{abstract}
+In this project I compiled version 3.14.26 of the Linux kernel on a Centos
+server and ran it in a virtual machine using qemu. Additionally, I completed a
+project implementing a classic problem in the field of concurrency.
+\end{abstract}
+
+\bigskip
+\bigskip
+\bigskip
+
+\section{Log of Commands}
+This is a selection of the commands I ran to clone and build the Linux kernel
+on the os-class server. Not all of them were run in the same shell.
+Note that I use several aliases for git, vim, and other common commands.
+\begin{verbatim}
+mkdir /scratch/spring2016/cs444-072/
+cd /scratch/spring2016/cs444-072/
+git init
+mkdir ass1
+v qemu.sh
+chmod +x qemu.sh
+./qemu.sh
+touch core-image-lsb-sdk-qemux86.ext3
+cp /scratch/opt/environment-setup-i586-poky-linux .
+source environment-setup-i586-poky-linux
+git clone git://git.yoctoproject.org/linux-yocto-3.14
+cd linux-yocto-3.14
+git checkout v3.14.26
+git checkout -b mcgrath
+cd ..
+cp /spring2015/files/config-3.14.26-yocto-qemu .
+ga config-3.14.26-yocto-qemu
+git commit
+ga qemu.sh
+git commit
+cp config-3.14.26-yocto-qemu linux-yocto-3.14/.config
+cd linux-yocto-3.14
+make -j4 all
+./qemu.sh
+v qemu.sh
+./qemu.sh
+gdb
+killall qemu-system-i386
+\end{verbatim}
+
+\section{QEMU Flags}
+These flags can be found in the QEMU man page \cite{qemu(1)}.
+\begin{enumerate}
+\item \texttt{-gdb tcp::5572} Open to connection with the GNU Debugger over TCP on port 5572. GDB can also use a custom protocol to communicate with qemu.
+\item \texttt{-S} Do not immediately start the CPU when qemu starts.
+\item \texttt{-nographic} Disable graphical output and redirect the emulated serial port to the console.
+\item \texttt{-kernel bzImage-qemux86.bin} Specifies the image to boot. This can be any multi-boot compliant kernel.
+\item \texttt{-drive file=core-image-lsb-sdk-qemux86.ext3,if=virtio} Define a new drive with the file \texttt{core-image-lsb-sdk-qemux86.ext3} over the virtio interface.
+\item \texttt{-enable-kvm} Use KVM virtualization.
+\item \texttt{-net none} Don't configure any network devices.
+\item \texttt{-usb} Enable USB driver.
+\item \texttt{-localtime} Use the system's local time.
+\item \texttt{-no-reboot} Don't reboot when if kernel crashes. A common cause would be a Triple Fault. Triple faults are nasty.
+\item \texttt{-append "root=/dev/vda rw console=ttyS0 debug"} Use the provided commands as the kernel command line.
+\end{enumerate}
+
+\section{What's the Point?}
+There are two parts of this assignment which have separate goals. The point of the first part is to familiarize students with the process of building the Linux Kernel and running it using QEMU. The point of the concurrency portion of the assignment is to refresh students' memories about using the pthread APIs and introduce them to a famous concurrency problem.
+
+\section{Personal Approach}
+When I began the assignment I started by reviewing the man pages for the various pthread functions. I also contemplated the pros and cons of using a mutex or a semaphore for controlling access to the buffer. I decided that a mutex was more applicable in this case because semaphores are more useful when only a fixed number of threads can share a resource, while a mutex can only be held by one thread at a time. It also allowed me to stick to the pthread API without using the posix semaphore API as well. Next I defined the data structures for the project. I made sure to pick meaningful data types for the item structure within the bounds of the description of the assignment. In this case, a thread cannot sleep for a negative period of time, so using a signed integer for a waiting period is an unwise decision. Another example of thoughtful data type choice involves the \texttt{BufferFill} variable, which holds the level of how full the buffer is. This should be a \texttt{size\_t} which is a data type for holding the maximum size of an array on the target system as an unsigned integer type.
+
+I noticed that in the assignment there were several ranges for different waiting periods. I decided that these periods were fairly arbitrary so I sequestered them into their own functions so they can be changed later without hunting through the rest of the code. This promotes a strong separation of concerns.
+
+I also created a \texttt{get\_random\_number\_function} which delegated to a function pointer called \texttt{real\_get\_random\_number}. Changing the function pointer changes the pseudo-random number generator which is called. This design means that the runtime check which determines which generator to use only happens once when the generator is configured. An alternative approach would be to use a static local variable which is set the first time the \texttt{get\_random\_number\_function} function is called, but this would make the function slower the first time it is called, harder to debug, and if another PRNG implementation is ever added this function will have to be changed significantly in addition to changing the PRNG initialization function. This design promotes separation of concerns and future extensibility at the expense of an extra function call every time a random number must be retrieved and additional global state.
+
+I then created created a debug target in the makefile which defines an additional preprocessor symbol named DEBUG and adds several flags. I then added \texttt{\#ifdef DEBUG} sections around my debugging print statements. Additionally, I made the debug print statements output to stderr.
+
+I made sure the minimize the critical section between where the mutex lock is acquired and where it is released. The space between these two calls should include as few statements as possible and these statements should only modify the \texttt{BufferFill} variable or the buffer itself. A thread should not sleep when a lock is being held. Additionally, getting a random number is an expensive operation so random numbers should not be generated when a lock is being held.
+
+All calls to the pthread family of functions should have their errors checked. An error caused by any of these functions is fatal and should lead to the immediate termination of the thread. Calls to sleep, printf, or fprintf may fail without serious consequences to the program, and their errors are not checked.
+
+The algorithm is incredibly simple. Three producers and three consumers are started by the main thread and after that they dive into a free-for-all as bloody as a rugby scrum to acquire the single lock. More efficient algorithms exist, but are not true to a legalistic reading of the assignment.
+
+The assembly for the assignment was incredibly straightforward. The function \texttt{cpu\_supports\_rdrand} does not need to save any registers since the only registers modified are the caller save registers. The \texttt{cpuid} instruction is run, which modifies the eax, ecx, and edx registers \cite{2_intel}. Only the content of the edx register is applicable, and only one bit in that register is necessary to determine whether the rdrand instruction is supported. This bit is masked out and the value is placed in the eax register to be the return value. The \texttt{native\_get\_random\_number} is ridiculously simple. It simply calls the rdrand instruction which places the random value in the eax register to be the return value \cite{1_intel}.
+
+I encountered an interesting difference between how GCC links code on OS X and on Linux. On OS X with GCC 5, external symbols' names are prefixed with an underscore, but they are not on Linux. An OS X specific macro created an alias with the necessary underscore.
+
+There is an old story about how Kernighan and Ritchie were writing UNIX before the days of source control, and they would periodically merge their code together. One day they did this and discovered that they had implemented a single simple UNIX command line utility independently, but their separate implementations were byte for byte identical. Those of us who are not programming gods are not nearly so consistent. In order to ensure that the assignment is compliant with the Linux Kernel Style Guide I ran the program \texttt{clang-format} on it with a custom configuration. \texttt{clang-format} rewrites the code to rigidly follow a style guide. I found this custom configuration in the LLVM documentation.
+
+\section{Testing}
+In this case testing was limited to manual testing. It would be a lot of effort to write unit tests for this program and I have other assignments to do. I did make sure that the debugging information was informative and manually checked that the threads were sleeping for the proper amount of time in the right order for the right amount of time, and that items were being consumed in the right order. Sample output of the debug mode is included. Note that the buffer size has been constrained to 4 in the debug builds so that the affects of the producer running out of space in the buffer can be observed in a shorter period of time. This value can be adjusted by defining a custom \texttt{BUFFER\_SIZE} at compile time.
+
+\begin{verbatim}
+Producer sleeping for 6
+Producer sleeping for 5
+Producer sleeping for 6
+Producing value 0
+Producer sleeping for 6
+Start consuming value 0
+Consumer sleeping for 5
+Producing value 0
+Producer sleeping for 4
+Start consuming value 0
+Consumer sleeping for 2
+Producing value 0
+Producer sleeping for 4
+Start consuming value 0
+Consumer sleeping for 2
+35126303
+Finish consuming value 0
+420483259
+Finish consuming value 0
+1506170311
+Finish consuming value 0
+Producing value 0
+Producer sleeping for 4
+Producing value 1
+Producer sleeping for 4
+Start consuming value 1
+Consumer sleeping for 2
+Start consuming value 0
+Consumer sleeping for 5
+Producing value 0
+Producer sleeping for 4
+Start consuming value 0
+Consumer sleeping for 3
+1513645288
+Finish consuming value 1
+917313663
+Producing value 0
+Finish consuming value 0
+Producer sleeping for 5
+Start consuming value 0
+Consumer sleeping for 3
+Producing value 0
+Producer sleeping for 5
+Start consuming value 0
+Consumer sleeping for 5
+1518140619
+\end{verbatim}
+\clearpage
+\printbibliography
+
+
+\end{document}
+\bibliography{bib.bib}
+\bibliographystyle{IEEEtran}
