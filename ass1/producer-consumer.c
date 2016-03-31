@@ -42,16 +42,23 @@ void *producer()
 		// Produce the item
 		struct item born;
 		born.value = get_random_number();
-		born.wait_period = (get_random_number() % 7) + 2;
+		born.wait_period = get_random_waiting_period();
 
 		// Acquire the lock
-		while (pthread_mutex_lock(&BufferLock))
-			;
+		if (pthread_mutex_lock(&BufferLock)) {
+            perror("Acquiring lock in Producer");
+            exit(EXIT_FAILURE);
+        }
+		
 
 		// Check to see if the buffer is full
 		if (BufferFill == BUFFER_SIZE) {
 			// The buffer is full. Give back the buffer.
-			pthread_mutex_unlock(&BufferLock);
+            if (pthread_mutex_unlock(&BufferLock)) {
+                perror("Releasing lock in Producer");
+                exit(EXIT_FAILURE);
+            }
+	
 			continue;
 		}
 		// Set the new item
@@ -63,7 +70,10 @@ void *producer()
 		// Indicate the item has been produced
 		BufferFill++;
 		// Release the lock
-		pthread_mutex_unlock(&BufferLock);
+        if (pthread_mutex_unlock(&BufferLock)) {
+            perror("Releasing lock in Producer");
+            exit(EXIT_FAILURE);
+        }
 	}
 	return NULL;
 }
@@ -72,11 +82,16 @@ void *consumer()
 {
 	while (true) {
 		// Acquire the lock.
-		while (pthread_mutex_lock(&BufferLock))
-			;
+		if (pthread_mutex_lock(&BufferLock)) {
+            perror("Acquiring lock in Consumer");
+            exit(EXIT_FAILURE);
+        }
 		// If the buffer is empty, release the lock and retry.
 		if (BufferFill == 0) {
-			pthread_mutex_unlock(&BufferLock);
+			if(pthread_mutex_unlock(&BufferLock)) {
+                perror("Releasing lock in Consumer");
+                exit(EXIT_FAILURE);
+            }
 			continue;
 		}
 		// Now that the lock has been acquired and we know there is at
@@ -93,8 +108,10 @@ void *consumer()
 
 		struct item eaten = Buffer[BufferFill];
 		// Unlock release the lock now that the item has been consumed.
-		pthread_mutex_unlock(&BufferLock);
-
+        if(pthread_mutex_unlock(&BufferLock)) {
+            perror("Releasing lock in Consumer");
+            exit(EXIT_FAILURE);
+        }
 // Sleep for the amount of time indicated in the item.
 #ifdef DEBUG
 		fprintf(stderr, "Consumer sleeping for %u\n",
@@ -129,7 +146,6 @@ int main()
 			} else { // EINVAL
 				exit(EXIT_FAILURE);
 			}
-			// pthread_join(producer_pool[i], NULL);
 		}
 	}
 
@@ -143,7 +159,17 @@ int main()
 			}
 		}
 	}
-	while (true) {
-	}
+	for (int i = 0; i < NUM_CONSUMERS; ++i) {
+        if (pthread_join(producer_pool[i], NULL)) {
+            perror("Main thread joining a producer thread");
+            exit(EXIT_FAILURE);
+        }
+    }
+	for (int i = 0; i < NUM_CONSUMERS; ++i) {
+        if (pthread_join(consumer_pool[i], NULL)) {
+            perror("Main thread joining a consumer thread");
+            exit(EXIT_FAILURE);
+        }
+    }
 	return 0;
 }
