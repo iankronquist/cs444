@@ -46,19 +46,18 @@ void *producer()
 
 		// Acquire the lock
 		if (pthread_mutex_lock(&BufferLock)) {
-            perror("Acquiring lock in Producer");
-            exit(EXIT_FAILURE);
-        }
-		
+			perror("Acquiring lock in Producer");
+			exit(EXIT_FAILURE);
+		}
 
 		// Check to see if the buffer is full
 		if (BufferFill == BUFFER_SIZE) {
 			// The buffer is full. Give back the buffer.
-            if (pthread_mutex_unlock(&BufferLock)) {
-                perror("Releasing lock in Producer");
-                exit(EXIT_FAILURE);
-            }
-	
+			if (pthread_mutex_unlock(&BufferLock)) {
+				perror("Releasing lock in Producer");
+				exit(EXIT_FAILURE);
+			}
+
 			continue;
 		}
 		// Set the new item
@@ -70,10 +69,10 @@ void *producer()
 		// Indicate the item has been produced
 		BufferFill++;
 		// Release the lock
-        if (pthread_mutex_unlock(&BufferLock)) {
-            perror("Releasing lock in Producer");
-            exit(EXIT_FAILURE);
-        }
+		if (pthread_mutex_unlock(&BufferLock)) {
+			perror("Releasing lock in Producer");
+			exit(EXIT_FAILURE);
+		}
 	}
 	return NULL;
 }
@@ -83,15 +82,15 @@ void *consumer()
 	while (true) {
 		// Acquire the lock.
 		if (pthread_mutex_lock(&BufferLock)) {
-            perror("Acquiring lock in Consumer");
-            exit(EXIT_FAILURE);
-        }
+			perror("Acquiring lock in Consumer");
+			exit(EXIT_FAILURE);
+		}
 		// If the buffer is empty, release the lock and retry.
 		if (BufferFill == 0) {
-			if(pthread_mutex_unlock(&BufferLock)) {
-                perror("Releasing lock in Consumer");
-                exit(EXIT_FAILURE);
-            }
+			if (pthread_mutex_unlock(&BufferLock)) {
+				perror("Releasing lock in Consumer");
+				exit(EXIT_FAILURE);
+			}
 			continue;
 		}
 		// Now that the lock has been acquired and we know there is at
@@ -108,10 +107,10 @@ void *consumer()
 
 		struct item eaten = Buffer[BufferFill];
 		// Unlock release the lock now that the item has been consumed.
-        if(pthread_mutex_unlock(&BufferLock)) {
-            perror("Releasing lock in Consumer");
-            exit(EXIT_FAILURE);
-        }
+		if (pthread_mutex_unlock(&BufferLock)) {
+			perror("Releasing lock in Consumer");
+			exit(EXIT_FAILURE);
+		}
 // Sleep for the amount of time indicated in the item.
 #ifdef DEBUG
 		fprintf(stderr, "Consumer sleeping for %u\n",
@@ -160,16 +159,16 @@ int main()
 		}
 	}
 	for (int i = 0; i < NUM_CONSUMERS; ++i) {
-        if (pthread_join(producer_pool[i], NULL)) {
-            perror("Main thread joining a producer thread");
-            exit(EXIT_FAILURE);
-        }
-    }
+		if (pthread_join(producer_pool[i], NULL)) {
+			perror("Main thread joining a producer thread");
+			exit(EXIT_FAILURE);
+		}
+	}
 	for (int i = 0; i < NUM_CONSUMERS; ++i) {
-        if (pthread_join(consumer_pool[i], NULL)) {
-            perror("Main thread joining a consumer thread");
-            exit(EXIT_FAILURE);
-        }
-    }
+		if (pthread_join(consumer_pool[i], NULL)) {
+			perror("Main thread joining a consumer thread");
+			exit(EXIT_FAILURE);
+		}
+	}
 	return 0;
 }
