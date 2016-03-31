@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Werror -Wall -Wextra -std=c99 -g
+CFLAGS=-Werror -Wall -Wextra -std=c99 -g -lpthread
 
 .PHONY: all
 all: producer-consumer
