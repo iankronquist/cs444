@@ -1,5 +1,10 @@
 .intel_syntax noprefix
 
+#ifdef __APPLE__
+#define cpu_supports_rdrand _cpu_supports_rdrand
+#define native_get_random_number _native_get_random_number
+#endif
+
 # uint32_t cpu_supports_rdrand()
 .global cpu_supports_rdrand
 cpu_supports_rdrand:
