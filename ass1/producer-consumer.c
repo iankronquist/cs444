@@ -31,7 +31,7 @@ pthread_mutex_t BufferLock = PTHREAD_MUTEX_INITIALIZER;
 void *producer() {
     while (true) {
         // Sleep for some amount of time
-        unsigned int sleep_length = get_random_period() % 10;
+        unsigned int sleep_length = get_random_production_period();
 
 #ifdef DEBUG
         fprintf(stderr, "Producer sleeping for %u\n", sleep_length);
@@ -41,7 +41,7 @@ void *producer() {
         // Produce the item
         struct item born;
         born.value = get_random_number();
-        born.wait_period = get_random_waiting_period();
+        born.wait_period = (get_random_number() % 7) + 2;
 
         // Acquire the lock
         while (pthread_mutex_lock(&BufferLock));
@@ -111,6 +111,8 @@ int main() {
 
     pthread_t consumer_pool[NUM_CONSUMERS];
     pthread_t producer_pool[NUM_PRODUCERS];
+
+    random_number_init();
 
     for (int i = 0; i < NUM_PRODUCERS; ++i) {
         while ((err = pthread_create(&producer_pool[i], NULL, producer, NULL))) {

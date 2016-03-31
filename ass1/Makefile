@@ -1,7 +1,6 @@
 CC=gcc
 CFLAGS=-Werror -Wall -Wextra -std=c99 -g
 
-
 .PHONY: all
 all: producer-consumer
 
@@ -9,11 +8,8 @@ all: producer-consumer
 debug: CFLAGS += -g -D DEBUG -D BUFFER_SIZE=4
 debug: producer-consumer
 
-producer-consumer: producer-consumer.c ass1_rand.o
-	$(CC) producer-consumer.c ass1_rand.o -o producer-consumer $(CFLAGS)
-
-ass1_rand.o: ass1_rand_rdrand.c
-	$(CC) -c ass1_rand_rdrand.c -o ass1_rand.o $(CFLAGS)
+producer-consumer: producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S
+	$(CC) producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S -o producer-consumer $(CFLAGS)
 
 .PHONY: clean
 clean:
