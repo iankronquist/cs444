@@ -1,10 +1,44 @@
 \documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{color}
 \usepackage{anysize}
+\usepackage{hyperref}
 \usepackage[backend=bibtex]{biblatex}
 \usepackage{amsmath}
 \marginsize{2cm}{2cm}{2cm}{2cm}
 \addbibresource{bib.bib}
 
+\lstdefinelanguage
+   [x86Extended]{Assembler}     % add an "x86Extended dialect of Assembler
+   [x86masm]{Assembler}         % based on the "x86masm" dialect
+   % Define new keywords
+   {morekeywords={rdrand, cpuid}}
+
+\lstdefinestyle{customc}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{OliveGreen},
+  commentstyle=\itshape\color{Fuchsia},
+  identifierstyle=\color{black},
+  stringstyle=\color{Bittersweet},
+}
+
+\lstdefinestyle{customasm}{
+  belowcaptionskip=1\baselineskip,
+  frame=L,
+  xleftmargin=\parindent,
+  language=[x86masm]Assembler,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{Fuchsia},
+}
+
+\lstset{escapechar=@,style=customc}
 
 \usepackage{graphicx}
 
@@ -29,43 +63,13 @@
     {\large \today\par}
 \end{titlepage}
 
-%\begin{titlepage}
-%\title{Project 1: Getting Acquainted}
-%    \vspace*{4cm}
-%    \begin{flushright}
-%    {\huge
-%    }
-%    \bigskip
-%    \bigskip
-%    \bigskip
-%    {\large
-%        CS 444,\\
-%        Sprint 2016
-%    }
-%    \end{flushright}
-%    \begin{flushleft}
-%    \end{flushleft}
-%    \begin{flushright}
-%    Ian Kronquist
-%    \end{flushright}
-%
-%\end{titlepage}
 
-
-
-
-
-% author names and affiliations
-% use a multiple column layout for up to three different
-% affiliations
 \author{\IEEEauthorblockN{Ian Kronquist}
 \IEEEauthorblockA{School of Electrical and\\Computer Science\\
 Oregon State University\\
 Corvallis, Oregon\\
 kronquii@oregonstate.edu}}
 
-% make the title area
-%\maketitle
 
 \begin{abstract}
 In this project I compiled version 3.14.26 of the Linux kernel on a Centos
@@ -138,15 +142,89 @@ I noticed that in the assignment there were several ranges for different waiting
 
 I also created a \texttt{get\_random\_number\_function} which delegated to a function pointer called \texttt{real\_get\_random\_number}. Changing the function pointer changes the pseudo-random number generator which is called. This design means that the runtime check which determines which generator to use only happens once when the generator is configured. An alternative approach would be to use a static local variable which is set the first time the \texttt{get\_random\_number\_function} function is called, but this would make the function slower the first time it is called, harder to debug, and if another PRNG implementation is ever added this function will have to be changed significantly in addition to changing the PRNG initialization function. This design promotes separation of concerns and future extensibility at the expense of an extra function call every time a random number must be retrieved and additional global state.
 
+\lstset{language=C,caption={Dispatching the Appropriate Implementation Using a Function Pointer},label=getRandomNumber}
+\begin{lstlisting}
+
+static unsigned int (*real_get_random_number)(void);
+
+unsigned int get_random_number() { return real_get_random_number(); }
+
+void random_number_init()
+{
+	if (cpu_supports_rdrand()) {
+		real_get_random_number = native_get_random_number;
+	} else {
+		initialize_mersenne_twister(time(0));
+		real_get_random_number = mersenne_twister_get_random_number;
+	}
+}
+\end{lstlisting}
+
 I then created created a debug target in the makefile which defines an additional preprocessor symbol named DEBUG and adds several flags. I then added \texttt{\#ifdef DEBUG} sections around my debugging print statements. Additionally, I made the debug print statements output to stderr.
 
 I made sure the minimize the critical section between where the mutex lock is acquired and where it is released. The space between these two calls should include as few statements as possible and these statements should only modify the \texttt{BufferFill} variable or the buffer itself. A thread should not sleep when a lock is being held. Additionally, getting a random number is an expensive operation so random numbers should not be generated when a lock is being held.
+
+\lstset{language=C,caption={Minimizing Critical Section},label=getRandomNumber}
+\begin{lstlisting}
+		// Acquire the lock
+		if (pthread_mutex_lock(&BufferLock)) {
+			perror("Acquiring lock in Producer");
+			exit(EXIT_FAILURE);
+		}
+
+		// Check to see if the buffer is full
+		if (BufferFill == BUFFER_SIZE) {
+			// The buffer is full. Give back the buffer.
+			if (pthread_mutex_unlock(&BufferLock)) {
+				perror("Releasing lock in Producer");
+				exit(EXIT_FAILURE);
+			}
+
+			continue;
+		}
+		// Set the new item
+		Buffer[BufferFill] = born;
+
+#ifdef DEBUG
+		fprintf(stderr, "Producing value %zu\n", BufferFill);
+#endif
+		// Indicate the item has been produced
+		BufferFill++;
+		// Release the lock
+		if (pthread_mutex_unlock(&BufferLock)) {
+			perror("Releasing lock in Producer");
+			exit(EXIT_FAILURE);
+		}
+
+\end{lstlisting}
 
 All calls to the pthread family of functions should have their errors checked. An error caused by any of these functions is fatal and should lead to the immediate termination of the thread. Calls to sleep, printf, or fprintf may fail without serious consequences to the program, and their errors are not checked.
 
 The algorithm is incredibly simple. Three producers and three consumers are started by the main thread and after that they dive into a free-for-all as bloody as a rugby scrum to acquire the single lock. More efficient algorithms exist, but are not true to a legalistic reading of the assignment.
 
-The assembly for the assignment was incredibly straightforward. The function \texttt{cpu\_supports\_rdrand} does not need to save any registers since the only registers modified are the caller save registers. The \texttt{cpuid} instruction is run, which modifies the eax, ecx, and edx registers \cite{2_intel}. Only the content of the edx register is applicable, and only one bit in that register is necessary to determine whether the rdrand instruction is supported. This bit is masked out and the value is placed in the eax register to be the return value. The \texttt{native\_get\_random\_number} is ridiculously simple. It simply calls the rdrand instruction which places the random value in the eax register to be the return value \cite{1_intel}.
+The assembly for the assignment was incredibly straightforward. The function \texttt{cpu\_supports\_rdrand} does not need to save any registers since the only registers modified are the caller save registers. The \texttt{cpuid} instruction is run, which modifies the eax, ecx, and edx registers \cite{2_intel}. Only the content of the edx register is applicable, and only one bit in that register is necessary to determine whether the rdrand instruction is supported. This bit is masked out and the value is placed in the eax register to be the return value.
+
+\lstset{language=[x86Extended]Assembler,caption={Using the CPUID Instruction to Determine If the CPU Supports RDRAND},label=getRandomNumber}
+\begin{lstlisting}
+; uint32_t cpu_supports_rdrand()
+global cpu_supports_rdrand
+cpu_supports_rdrand:
+	; Registers ECX, EAX, and EDX are caller saved
+	cpuid
+	mov edx, eax
+	and eax, (1<<30)
+	ret
+\end{lstlisting}
+
+\lstset{language=[x86Extended]Assembler,caption={Using the RDRAND Instruction to Generate Random Numbers},label=getRandomNumber}
+The \texttt{native\_get\_random\_number} is ridiculously simple. It simply calls the rdrand instruction which places the random value in the eax register to be the return value \cite{1_intel}.
+\begin{lstlisting}
+; uint32_t native_get_random_number()
+global native_get_random_number
+native_get_random_number:
+	rdrand eax
+	ret
+\end{lstlisting}
 
 I encountered an interesting difference between how GCC links code on OS X and on Linux. On OS X with GCC 5, external symbols' names are prefixed with an underscore, but they are not on Linux. An OS X specific macro created an alias with the necessary underscore.
 
@@ -154,6 +232,7 @@ There is an old story about how Kernighan and Ritchie were writing UNIX before t
 
 \section{Testing}
 In this case testing was limited to manual testing. It would be a lot of effort to write unit tests for this program and I have other assignments to do. I did make sure that the debugging information was informative and manually checked that the threads were sleeping for the proper amount of time in the right order for the right amount of time, and that items were being consumed in the right order. Sample output of the debug mode is included. Note that the buffer size has been constrained to 4 in the debug builds so that the affects of the producer running out of space in the buffer can be observed in a shorter period of time. This value can be adjusted by defining a custom \texttt{BUFFER\_SIZE} at compile time.
+
 
 \begin{verbatim}
 Producer sleeping for 6
@@ -203,9 +282,36 @@ Start consuming value 0
 Consumer sleeping for 5
 1518140619
 \end{verbatim}
+
+\section{What I learned}
+I spent a great deal of time learning more about how Latex can build nifty citations with bibtex. I also learned about some new Latex macros and how to build PDF documents without \texttt{pdflatex}. I got the opportunity to review the pthreads API. I also got learned a few new arguments for QEMU, which should come in handy because I use that tool so often. I was able to learn more about the Linux config file, which I knew existed but had never played with. The rest of the Linux build process is reassuringly boring. I also refreshed my understanding of the Mersenne Twister. Its implementation is beguilingly simple but theoretically dizzying.
+
+
+\section{Work Log}
+\begin{tabular}{l l l}
+    \textbf{Approximate Start Time} & \textbf{Approximate Duration} & \textbf{Activity} \\
+    \hline
+    19:00 Tuesday, March 29 & 30 min & Copy Linux build environment and configuration files \\
+    19:30 Tuesday, March 29 & 1 hour 15 min & Implement data structures, multi-threading, and native assembly PRNG \\
+    16:30 wednesday, march 30 & 15 min & Build Linux and log in with gdb. \\
+    17:00 wednesday, march 30 & 1 hour 15 min & Implement Mersenne Twister, cpuid, and runtime PRNG determination \\
+    19:00 Wednesday, March 30 & 15 min & Clean up C code \\
+    19:15 Wednesday, March 30 & 2 hours 20 min & Write report \\
+    21:35 Wednesday, March 30 & 5 min & More C code clean up \\
+    21:40 Wednesday, March 30 & 1 hour & Learn bibtex and write a shell script for creating git log \\
+    23:10 Wednesday, March 30 & 45 min & Learn about code listings and add them to the report. Define a custom dialect of assembler using the Latex listing packages so cpuid and rdrand show up as instructions. \\
+    23:30 Wednesday, March 30 & 10 min & Prepare report for submission, assuming that the proper packages will be installed on os-class \\
+\end{tabular}
+
+\bigskip
+\bigskip
+
+\section{Git Logs}
+\input{git_log.tex}
+
+
 \clearpage
 \printbibliography
-
 
 \end{document}
 \bibliography{bib.bib}
