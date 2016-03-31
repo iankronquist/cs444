@@ -18,11 +18,14 @@ PDF	= $(SRC:%.tex=%.pdf)
 
 all: producer-consumer pdf
 
+git_log.tex: changelog_latex.sh
+	sh changelog_latex.sh
+
 pdf: $(PDF)
 
 ps: $(PSF)
 
-$(TRG): %.dvi: %.tex *.bib $(EXAMPLES)
+$(TRG): %.dvi: %.tex *.bib $(EXAMPLES) git_log.tex
 	$(LATEX) $<
 	$(BIBTEX) $(<:%.tex=%)
 	$(LATEX) $<
@@ -50,6 +53,7 @@ producer-consumer: producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_ran
 	$(CC) producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S -o producer-consumer $(CFLAGS)
 
 clean:
+	rm -f git_log.tex
 	rm -f *.o producer-consumer
 	rm -rf *.dSYM/
 	rm -f *.pdf *.ps *.dvi *.out *.log *.aux *.bbl *.blg *.pyg
