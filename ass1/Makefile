@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Werror -Wall -Wextra -std=c99 -g -lpthread
+CFLAGS=-Werror -Wall -Wextra -std=c99 -g -lpthread -D DEBUG
 
 # Latex stuff
 LATEX	= latex -shell-escape
@@ -44,10 +44,12 @@ show: $(TRG)
 showps: $(PSF)
 	@for i in $(PSF) ; do $(GH) $$i & done
 
+test: test-producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S _producer-consumer.c
+	$(CC) test-producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S -o test-producer-consumer $(CFLAGS)
 
 
-debug: CFLAGS += -g -D DEBUG -D BUFFER_SIZE=4
-debug: producer-consumer
+debug: CFLAGS += -g -D BUFFER_SIZE=4
+debug: producer-consumer test-producer-consumer
 
 producer-consumer: producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S
 	$(CC) producer-consumer.c ass1_rand.c ass1_rand_mersenne.c ass1_rand.S -o producer-consumer $(CFLAGS)
