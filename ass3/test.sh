@@ -4,12 +4,14 @@ echo $?
 
 mkfs /dev/ebd0
 echo $?
-mnt /dev/ebd0 /mnt
+mount /dev/ebd0 /mnt
 echo $?
 
 echo 'hello encryption!' > /mnt/hello
 
 cat /mnt/hello
+
+umount /mnt
 
 rmmod ebd.ko
 echo $?
