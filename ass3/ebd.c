@@ -6,26 +6,40 @@
 #include <linux/fs.h>
 #include <linux/crypto.h>
 
+/* This block device pretends to be a hard disk. It is actually backed by RAM.
+   It encrypts its contents using AES.
+   Resources consulted:
+   * http://blog.superpat.com/2010/05/04/a-simple-block-driver-for-linux-kernel-2-6-31/
+   * crypto/tcrypt.c
+   * Documentation/crypto/api-intro.txt 
+*/
 
+
+// Define runtime configurable module parameters.
 static int major_num = 0;
 module_param(major_num, int, 0);
 static int logical_block_size = 512;
 module_param(logical_block_size, int, 0);
 static int num_sectors;
 module_param(num_sectors, int, 0);
+
+// Create global queue for servicing requests.
 static struct request_queue *Queue;
 
 #define KERNEL_SECTOR_SIZE 512
 
-// https://www.kernel.org/doc/ols/2003/ols2003-pages-128-133.pdf
-// http://blog.superpat.com/2010/05/04/a-simple-block-driver-for-linux-kernel-2-6-31/
+// Key size in bytes
+#define KEY_SIZE 32
 
+/* A global structure representing the device.
+*/
 static struct ebd_device {
     unsigned long size;
     spinlock_t lock;
     u8 *data;
-    char key[8];
-    struct crypto_tfm *tfm;
+    u8 key[KEY_SIZE];
+    struct crypto_blkcipher *blkcipher;
+    struct scatterlist sg[2];
     struct gendisk *gd;
 } Device;
 
@@ -40,6 +54,8 @@ static void ebd_transfer(struct ebd_device *dev, sector_t sector,
             offset, num_bytes);
     }
     if (write) {
+        int len;
+        char result[64];
         memcpy(dev->data + offset, buffer, num_bytes);
     } else {
         memcpy(buffer, dev->data + offset, num_bytes);
@@ -79,42 +95,85 @@ static struct block_device_operations ebd_ops = {
 };
 
 static int __init ebd_init(void) {
+    unsigned int err;
+    // Initialize the device spin lock. Only one process should be able to
+    // read/write to the device at time.
     spin_lock_init(&Device.lock);
+
+    // Allocate memory to hold encrypted contents.
     if (!(Device.data = vmalloc(Device.size))) {
-        return ENOMEM;
+        printk(KERN_NOTICE, "Failed to allocate memory");
+        goto free_mem;
     }
 
+    // Allocate block cipher machinery.
+    Device.blkcipher = crypto_alloc_blkcipher("aes", 0, CRYPTO_ALG_ASYNC);
+    if (IS_ERR(Device.blkcipher)) {
+        printk(KERN_NOTICE, "Failed to load aes cryptographic transform");
+        goto free_mem;
+    }
+
+    // Initialize the scatter/gather table used to perform the encryption.
+    //sg_init_table(Device.sg, );
+
+    // FIXME: Generate random key.
+    // Generate a key.
+    u8 *test_key = "0123456789abcdef0123456789abcdef";
+    memcpy(Device.key, test_key, KEY_SIZE);
+
+    // Set the key
+    err = crypto_blkcipher_setkey(Device.blkcipher, Device.key,
+        KEY_SIZE);
+    if (err) {
+        printk(KERN_NOTICE, "Failed to set key");
+        goto free_mem;
+    }
+
+    // Create the queue of memory blocks.
     Queue = blk_init_queue(ebd_request, &Device.lock);
-
     if (Queue == NULL) {
-        vfree(Device.data);
-        return ENOMEM;
+        printk(KERN_NOTICE, "Failed to set key");
+        goto free_mem;
     }
 
+    // Set the block size.
     blk_queue_logical_block_size(Queue, logical_block_size);
 
-    major_num = register_blkdev(major_num, "ebd");
+    // Add the queue to the device structure.
+    Device.gd->queue = Queue;
 
+    // Register the driver major number, a unique numeric id.
+    major_num = register_blkdev(major_num, "ebd");
     if (major_num < 0) {
         printk(KERN_WARNING, "ebd: could not get major number for device");
-        vfree(Device.data);
-        return ENOMEM;
+        goto free_mem;
     }
+
+    // Allocate the VRAM disk
     Device.gd = alloc_disk(16);
     if (Device.gd == 0) {
-        unregister_blkdev(major_num, "ebd");
-        vfree(Device.data);
-        return ENOMEM;
+        goto remove_dev;
     }
+    
+    // Set up the disk properly.
     Device.gd->major = major_num;
     Device.gd->first_minor = 0;
     Device.gd->fops = &ebd_ops;
     Device.gd->private_data = &Device;
     strncpy(Device.gd->disk_name, "ebd0", 4);
+    // Set the disk capacity for the disk.
     set_capacity(Device.gd, num_sectors);
-    Device.gd->queue = Queue;
+
     add_disk(Device.gd);
+
+    //
     return 0;
+
+remove_dev:
+    unregister_blkdev(major_num, "ebd");
+free_mem:
+    vfree(Device.data);
+    return ENOMEM;
 }
 
 static void __exit ebd_exit(void) {
