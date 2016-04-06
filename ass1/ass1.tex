@@ -231,7 +231,7 @@ I encountered an interesting difference between how GCC links code on OS X and o
 There is an old story about how Kernighan and Ritchie were writing UNIX before the days of source control, and they would periodically merge their code together. One day they did this and discovered that they had implemented a single simple UNIX command line utility independently, but their separate implementations were byte for byte identical. Those of us who are not programming gods are not nearly so consistent. In order to ensure that the assignment is compliant with the Linux Kernel Style Guide I ran the program \texttt{clang-format} on it with a custom configuration. \texttt{clang-format} rewrites the code to rigidly follow a style guide. I found this custom configuration in the LLVM documentation.
 
 \section{Testing}
-In this case testing was limited to manual testing. It would be a lot of effort to write unit tests for this program and I have other assignments to do. I did make sure that the debugging information was informative and manually checked that the threads were sleeping for the proper amount of time in the right order for the right amount of time, and that items were being consumed in the right order. Sample output of the debug mode is included. Note that the buffer size has been constrained to 4 in the debug builds so that the affects of the producer running out of space in the buffer can be observed in a shorter period of time. This value can be adjusted by defining a custom \texttt{BUFFER\_SIZE} at compile time.
+I started by manually make sure that the debugging information was informative and manually checked that the threads were sleeping for the proper amount of time in the right order for the right amount of time, and that items were being consumed in the right order. Sample output of the debug mode is included. Note that the buffer size has been constrained to 4 in the debug builds so that the affects of the producer running out of space in the buffer can be observed in a shorter period of time. This value can be adjusted by defining a custom \texttt{BUFFER\_SIZE} at compile time. I also wrote a simple unit test. The test is not terribly complex. It uses simple asserts to ensure that the lock is unlocked after every call and that the buffer contents are not disturbed. The tests are in \texttt{test-producer-consumer.c} and can be built using the \texttt{make test} target.
 
 
 \begin{verbatim}
@@ -301,13 +301,53 @@ I spent a great deal of time learning more about how Latex can build nifty citat
     21:40 Wednesday, March 30 & 1 hour & Learn bibtex and write a shell script for creating git log \\
     23:10 Wednesday, March 30 & 45 min & Learn about code listings and add them to the report. Define a custom dialect of assembler using the Latex listing packages so cpuid and rdrand show up as instructions. \\
     23:30 Wednesday, March 30 & 10 min & Prepare report for submission, assuming that the proper packages will be installed on os-class \\
+    8:45 Tuesday, April 5 & 15 min & Write test because McGrath explicitly asked for one in class despite not mentioning one in the assignment.
 \end{tabular}
 
 \bigskip
 \bigskip
 
 \section{Git Logs}
-\input{git_log.tex}
+\begin{tabular}{l l l}\textbf{Detail} & \textbf{Author} & \textbf{Description}\\ \hline\href{git@github.com:iankronquist/cs444/commit/6c4c4ad85b24e29c66726d07a80b0d9b05791010}{6c4c4ad} & Ian Kronquist & Preserve env setup script for bash\\\hline
+\href{git@github.com:iankronquist/cs444/commit/3b610803bb893ba4d4c2bf7fc0ed67306e884456}{3b61080} & Ian Kronquist & Add long qemu command in a script\\\hline
+\href{git@github.com:iankronquist/cs444/commit/83c50214d9dd20bfd3cc722178af0a18bc4d1497}{83c5021} & Ian Kronquist & Add yocto build config\\\hline
+\href{git@github.com:iankronquist/cs444/commit/9e3dd48a769717e235ec85308267d1b6db4e95bf}{9e3dd48} & Ian Kronquist & First pass as implementation of assignment 1\\\hline
+\href{git@github.com:iankronquist/cs444/commit/517b86ff39f3a9e738eb940cf5833c2f0b97cb43}{517b86f} & Ian Kronquist & Remove vim swapfiles\\\hline
+\href{git@github.com:iankronquist/cs444/commit/984b2540a9ed74f5042680ddedfc52038284e6d7}{984b254} & Ian Kronquist & Finished main part of the assignment\\\hline
+\href{git@github.com:iankronquist/cs444/commit/5a593b9919d77a4e071d5b2397bb494003ce8a37}{5a593b9} & Ian Kronquist & Create Makefile which builds rdrand version\\\hline
+\href{git@github.com:iankronquist/cs444/commit/25d0acf4229a54bf6bc5207be44677f41589cfc1}{25d0acf} & Ian Kronquist & Add debug target\\\hline
+\href{git@github.com:iankronquist/cs444/commit/68c6230302be556de31b395f8c14b650b16b8039}{68c6230} & Ian Kronquist & Fix typo in rdrand version\\\hline
+\href{git@github.com:iankronquist/cs444/commit/f6b831677fdf90ec9658466e6afe8fbd75d31177}{f6b8316} & Ian Kronquist & Fix debug print statements\\\hline
+\href{git@github.com:iankronquist/cs444/commit/d85785b20039eac76880d1f86105e9f8d03e3895}{d85785b} & Ian Kronquist & Add a README\\\hline
+\href{git@github.com:iankronquist/cs444/commit/5b429c1763541f159d23490d3b12166302cefc10}{5b429c1} & Ian Kronquist & Determine prng at runtime\\\hline
+\href{git@github.com:iankronquist/cs444/commit/2e1d1d6fc6019e67e686e65e637c4c1ec495488f}{2e1d1d6} & Ian Kronquist & Link with -lpthread\\\hline
+\href{git@github.com:iankronquist/cs444/commit/dcd7396df1b76690538705a49fdb7ee0edf8eee7}{dcd7396} & Ian Kronquist & Fix typo in register name\\\hline
+\href{git@github.com:iankronquist/cs444/commit/4e0bdfcc3d106814ecd84b42e5234ec644f5f3f0}{4e0bdfc} & Ian Kronquist & Remove unnecessary initializer\\\hline
+\href{git@github.com:iankronquist/cs444/commit/880d8ebe8ddfc4c4550e07c30ecb037fcb09570e}{880d8eb} & Ian Kronquist & Fix linking on OS X\\\hline
+\href{git@github.com:iankronquist/cs444/commit/9e6331ff9ab92c498639b8834fbb6d4b5a4f7403}{9e6331f} & Ian Kronquist & Add Linux coding style-like .clang-format file\\\hline
+\href{git@github.com:iankronquist/cs444/commit/dac8e44c9ac4dfc092dac067c8014b18c46326f1}{dac8e44} & Ian Kronquist & Run clang-format on C files\\\hline
+\href{git@github.com:iankronquist/cs444/commit/800cc38c9370a30fec56c865f505d19a88de5c63}{800cc38} & Ian Kronquist & First draft of report for assignment 1\\\hline
+\href{git@github.com:iankronquist/cs444/commit/f285be63fbc6a89bdc2c5db115f7e1f372ad41f3}{f285be6} & Ian Kronquist & Add latex building bits to Makefile\\\hline
+\href{git@github.com:iankronquist/cs444/commit/db301c2e64d57a285039892bf3b050ce0b8b9134}{db301c2} & Ian Kronquist & Improve pthread usage\\\hline
+\href{git@github.com:iankronquist/cs444/commit/471954de94723642247f08c71c04b862a85e648a}{471954d} & Ian Kronquist & Run clang-format on producer-consumer.c\\\hline
+\href{git@github.com:iankronquist/cs444/commit/cefbcbf80b87afe068c91004e5825d88b639fb89}{cefbcbf} & Ian Kronquist & Add new sections and listings\\\hline
+\href{git@github.com:iankronquist/cs444/commit/2acfdad69042df82fb1c2cc46fde841aa167b4a7}{2acfdad} & Ian Kronquist & Build git\_log.text as part of pdf target\\\hline
+\href{git@github.com:iankronquist/cs444/commit/3bbfb59c0f65f3496a75ba8dfa45e923ca39fb88}{3bbfb59} & Ian Kronquist & Add script which generates changelog latex doc\\\hline
+\href{git@github.com:iankronquist/cs444/commit/a4552398b16056270c2ceb4b2944c12d0b530470}{a455239} & Ian Kronquist & Change path to kernel image\\\hline
+\href{git@github.com:iankronquist/cs444/commit/61f46b28903ed766bb4474c22bb43f07329e847a}{61f46b2} & Ian Kronquist & Vendor latex dependencies\\\hline
+\href{git@github.com:iankronquist/cs444/commit/372766a3af5cebe7bcb0e19526e703ead5546e24}{372766a} & Ian Kronquist & Merge branch 'master' of https://github.com/iankronquist/cs444\\\hline
+\href{git@github.com:iankronquist/cs444/commit/67f91af6cfce11662d5e2e5d79abef1fe25ba588}{67f91af} & Ian Kronquist & Include dependencies manually\\\hline
+\href{git@github.com:iankronquist/cs444/commit/35012305f5307c9f4cbeda825f8ac55bf231a3c8}{3501230} & Ian Kronquist & More latex files\\\hline
+\href{git@github.com:iankronquist/cs444/commit/355a1fc34c346abd2dd0e306bc62267eea41bdff}{355a1fc} & Ian Kronquist & Make sure latex table doesn't extend past the page\\\hline
+\href{git@github.com:iankronquist/cs444/commit/6e1f40269ebc2fa5277338f092d784355cba9864}{6e1f402} & Ian Kronquist & Fix escaping in git log table generation script\\\hline
+\href{git@github.com:iankronquist/cs444/commit/7b2ad566e48c9c5483a6105728765c15b7497051}{7b2ad56} & Ian Kronquist & Replace echo with printf\\\hline
+\href{git@github.com:iankronquist/cs444/commit/495939bec91e9233f6151a616d0811425470235e}{495939b} & Ian Kronquist & Fix escaping in git log generation shell script\\\hline
+\href{git@github.com:iankronquist/cs444/commit/8ca0181ad52664f27ee80fb2829e1702c4334cfe}{8ca0181} & Ian Kronquist & First version of encrypted block device module\\\hline
+\href{git@github.com:iankronquist/cs444/commit/53b6fe7ae70719a16a0c6b4e50ec72dd582ff989}{53b6fe7} & Ian Kronquist & Miscellaneous notes\\\hline
+\href{git@github.com:iankronquist/cs444/commit/4295f57ebb82a2167c116d54306ab041a4c55ffa}{4295f57} & Ian Kronquist & Add git ignore files\\\hline
+\href{git@github.com:iankronquist/cs444/commit/fd8e2ff3420b4410d9bac99406076c794f2e25ab}{fd8e2ff} & Ian Kronquist & Refactor core components into another file\\\hline
+\href{git@github.com:iankronquist/cs444/commit/d1d9a87e0ed0365bb0c830ba279a2cb0d8eb0192}{d1d9a87} & Ian Kronquist & Tests\\\hline
+\end{tabular}
 
 
 \clearpage
