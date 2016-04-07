@@ -9,6 +9,7 @@
 .global cpu_supports_rdrand
 cpu_supports_rdrand:
 	# Registers ECX, EAX, and EDX are caller saved
+	mov eax, 0x1
 	cpuid
 	mov edx, eax
 	and eax, (1<<30)
