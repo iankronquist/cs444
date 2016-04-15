@@ -1,6 +1,7 @@
 #ifndef DINING_PHILOSOPHERS_H
 #define DINING_PHILOSOPHERS_H
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <semaphore.h>
