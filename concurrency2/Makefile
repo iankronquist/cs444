@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= -std=c99 -O2 -Wall -Werror -Wextra -pthread -Wno-deprecated-declarations
+CFLAGS= -std=c99 -O2 -Wall -Werror -Wextra -pthread
 
 all: dining_philosophers test_dining_philosophers
 
