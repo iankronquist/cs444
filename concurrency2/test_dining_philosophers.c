@@ -13,7 +13,7 @@ int main() {
 
     // Initial condition
     sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, 0);
+    EXPECT_EQ(sem_val, NUM_FORKS);
 
     get_chopsticks();
 
@@ -23,7 +23,7 @@ int main() {
     put_chopsticks();
 
     sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, 0);
+    EXPECT_EQ(sem_val, NUM_FORKS);
 
 
     assert(sem_close(Chopsticks) == 0);
