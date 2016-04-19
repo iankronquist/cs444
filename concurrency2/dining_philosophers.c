@@ -9,7 +9,7 @@ char *PhilosopherNames[NUM_PHILOSOPHERS] = {
     "Martha Nussbaum",
 };
 
-struct philosopher Philosophers[NUM_PHILOSOPHERS] = {NULL};
+struct philosopher Philosophers[NUM_PHILOSOPHERS];
 pthread_t Workers[NUM_PHILOSOPHERS];
 pthread_mutex_t Locks[NUM_PHILOSOPHERS] = {PTHREAD_MUTEX_INITIALIZER};
 
@@ -28,23 +28,26 @@ void get_chopsticks(struct philosopher *philo) {
         philo->left = NULL;
         philo->right = NULL;
         for (unsigned i = 0; i < NUM_PHILOSOPHERS; ++i) {
-            if (pthread_mutex_trylock(Locks[i]) != 0) {
-                if (errno != EBUSY) {
-                    perror("Getting first chopstick");
+            if (pthread_mutex_trylock(&Locks[i]) != 0) {
+                if (errno != EBUSY && errno != 0) {
+                    perror("Getting chopstick");
                     cleanup(EXIT_FAILURE);
                 }
                 continue;
             } else {
+                printf("%s picked up chopstick %u\n", philo->name, i);
                 if (philo->left == NULL) {
                     philo->left = &Locks[i];
                 } else {
                     philo->right = &Locks[i];
+                    break;
                 }
             }
 
         }
         if (philo->right == NULL) {
             if (philo->left != NULL) {
+                printf("%s put down chopstick %u\n", philo->name, i);
                 pthread_mutex_unlock(philo->left);
             }
             continue;
@@ -71,16 +74,16 @@ void cleanup(int exit_val) {
 
 void *loop(void *input) {
     unsigned i = (uintptr_t)input;
-    struct philosopher *philo = Philosophers[i];
+    struct philosopher *philo = &Philosophers[i];
     philo->name = PhilosopherNames[i];
     while (true) {
-        printf("%s is starting to think.\n", name);
+        printf("%s is starting to think.\n", philo->name);
         think();
-        printf("%s is done thinking.\n", name);
+        printf("%s is done thinking.\n", philo->name);
         get_chopsticks(philo);
-        printf("%s is starting to eat.\n", name);
+        printf("%s is starting to eat.\n", philo->name);
         eat();
-        printf("%s is done eating.\n", name);
+        printf("%s is done eating.\n", philo->name);
         put_chopsticks(philo);
     }
     return NULL;

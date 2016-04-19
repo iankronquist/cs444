@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <semaphore.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,13 +18,13 @@
 
 struct philosopher {
     char *name;
-    pthread_t *left;
-    pthread_t *right;
+    pthread_mutex_t *left;
+    pthread_mutex_t *right;
 };
 
-extern struct philosopher Philosophers[NUM_PHILOSOPHERS] = {NULL};
+extern struct philosopher Philosophers[NUM_PHILOSOPHERS];
 extern pthread_t Workers[NUM_PHILOSOPHERS];
-extern pthread_mutex_t Locks[NUM_PHILOSOPHERS] = {PTHREAD_MUTEX_INITIALIZER};
+extern pthread_mutex_t Locks[NUM_PHILOSOPHERS];
 extern char *PhilosopherNames[NUM_PHILOSOPHERS];
 
 void think();
