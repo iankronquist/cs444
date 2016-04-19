@@ -18,15 +18,41 @@ int main() {
     get_chopsticks();
 
     sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, 2);
+    EXPECT_EQ(sem_val, NUM_FORKS-2);
 
     put_chopsticks();
 
     sem_getvalue(Chopsticks, &sem_val);
     EXPECT_EQ(sem_val, NUM_FORKS);
 
+    get_chopsticks();
+
+    sem_getvalue(Chopsticks, &sem_val);
+    EXPECT_EQ(sem_val, NUM_FORKS-2);
+
+
+    get_chopsticks();
+
+    sem_getvalue(Chopsticks, &sem_val);
+    EXPECT_EQ(sem_val, NUM_FORKS-4);
+
+    // fails gracefully
+    get_chopsticks();
+
+    sem_getvalue(Chopsticks, &sem_val);
+    EXPECT_EQ(sem_val, NUM_FORKS-4);
+
+    put_chopsticks();
+
+    sem_getvalue(Chopsticks, &sem_val);
+    EXPECT_EQ(sem_val, NUM_FORKS-2);
+
+    put_chopsticks();
+
+    sem_getvalue(Chopsticks, &sem_val);
+    EXPECT_EQ(sem_val, NUM_FORKS);
 
     assert(sem_close(Chopsticks) == 0);
 
-    return 0;
+    return RETURN_VALUE;
 }
