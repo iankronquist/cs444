@@ -3,56 +3,82 @@
 
 #include <assert.h>
 
-int main() {
-    int sem_val;
-    char *sem_name = strcat(getlogin(), "_philosophers_test");
-    Chopsticks = sem_open(sem_name, O_CREAT, 0700, NUM_FORKS);
-    assert(Chopsticks != SEM_FAILED);
+void lock_range(int begin, int end) {
+    for (int i = begin; i < end; ++i) {
+        pthread_mutex_lock(&Locks[i]);
+    }
+}
 
-    // When there are sufficient chopsticks
+void unlock_range(int begin, int end) {
+    for (int i = begin; i < end; ++i) {
+        pthread_mutex_unlock(&Locks[i]);
+    }
+}
+
+bool is_locked(int lock) {
+    int status = pthread_mutex_trylock(&Locks[lock]);
+    if (status == 0) {
+        pthread_mutex_unlock(&Locks[lock]);
+        return false;
+    } else if (status == EBUSY) {
+        return true;
+    } else {
+        fprintf(stderr, "Broken lock!\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+bool is_unlocked(int lock) {
+    return !is_locked(lock);
+}
+
+bool are_all(int begin, int end, bool (*f)(int)) {
+    for (int i = begin; i < end; ++i) {
+        if (!f(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int main() {
+
+    struct philosopher philo = {
+        .name = "testing",
+        .left = NULL,
+        .right = NULL,
+    };
+    struct philosopher philo2 = {
+        .name = "testing",
+        .left = NULL,
+        .right = NULL,
+    };
 
     // Initial condition
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS);
+    EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
-    get_chopsticks();
+    get_chopsticks(&philo);
 
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS-2);
+    EXPECT_EQ(are_all(0, 2, is_locked), true);
+    EXPECT_EQ(are_all(2, NUM_FORKS, is_unlocked), true);
 
-    put_chopsticks();
+    put_chopsticks(&philo);
 
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS);
+    EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
-    get_chopsticks();
+    get_chopsticks(&philo);
 
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS-2);
+    EXPECT_EQ(are_all(0, 2, is_locked), true);
+    EXPECT_EQ(are_all(2, NUM_FORKS, is_unlocked), true);
 
+    get_chopsticks(&philo2);
 
-    get_chopsticks();
+    EXPECT_EQ(are_all(0, 4, is_locked), true);
+    EXPECT_EQ(are_all(4, NUM_FORKS, is_unlocked), true);
 
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS-4);
-
-    // fails gracefully
-    get_chopsticks();
-
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS-4);
-
-    put_chopsticks();
-
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS-2);
-
-    put_chopsticks();
-
-    sem_getvalue(Chopsticks, &sem_val);
-    EXPECT_EQ(sem_val, NUM_FORKS);
-
-    assert(sem_close(Chopsticks) == 0);
+    put_chopsticks(&philo);
+    put_chopsticks(&philo2);
+    EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
     return RETURN_VALUE;
 }
