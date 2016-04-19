@@ -15,9 +15,16 @@
 #define NUM_PHILOSOPHERS 5
 #define NUM_FORKS NUM_PHILOSOPHERS
 
-extern char *Philosophers[NUM_PHILOSOPHERS];
+struct philosopher {
+    char *name;
+    pthread_t *left;
+    pthread_t *right;
+};
+
+extern struct philosopher Philosophers[NUM_PHILOSOPHERS] = {NULL};
 extern pthread_t Workers[NUM_PHILOSOPHERS];
-extern sem_t *Chopsticks;
+extern pthread_mutex_t Locks[NUM_PHILOSOPHERS] = {PTHREAD_MUTEX_INITIALIZER};
+extern char *PhilosopherNames[NUM_PHILOSOPHERS];
 
 void think();
 void eat();

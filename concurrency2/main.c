@@ -13,7 +13,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
     for (unsigned i = 0; i < NUM_PHILOSOPHERS; ++i) {
-        pthread_create(&Workers[i], NULL, loop, Philosophers[i]);
+        pthread_create(&Workers[i], NULL, i);
     }
     for (unsigned i = 0; i < NUM_PHILOSOPHERS; ++i) {
         pthread_join(Workers[i], NULL);
