@@ -47,7 +47,7 @@ void get_chopsticks(struct philosopher *philo) {
         }
         if (philo->right == NULL) {
             if (philo->left != NULL) {
-                printf("%s put down chopstick %u\n", philo->name, i);
+                printf("%s put down chopstick\n", philo->name);
                 pthread_mutex_unlock(philo->left);
             }
             continue;
