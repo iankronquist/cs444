@@ -11,7 +11,13 @@ char *PhilosopherNames[NUM_PHILOSOPHERS] = {
 
 struct philosopher Philosophers[NUM_PHILOSOPHERS];
 pthread_t Workers[NUM_PHILOSOPHERS];
-pthread_mutex_t Locks[NUM_PHILOSOPHERS] = {PTHREAD_MUTEX_INITIALIZER};
+pthread_mutex_t Locks[NUM_PHILOSOPHERS] = {
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER
+};
 
 void think() {
     int sleep_time = (rand() % 20) + 1;
@@ -23,48 +29,30 @@ void eat() {
     sleep(sleep_time);
 }
 
-void get_chopsticks(struct philosopher *philo) {
-    while (true) {
-        philo->left = NULL;
-        philo->right = NULL;
-        for (unsigned i = 0; i < NUM_PHILOSOPHERS; ++i) {
-            if (pthread_mutex_trylock(&Locks[i]) != 0) {
-                if (errno != EBUSY && errno != 0) {
-                    perror("Getting chopstick");
-                    cleanup(EXIT_FAILURE);
-                }
-                continue;
-            } else {
-                printf("%s picked up chopstick %u\n", philo->name, i);
-                if (philo->left == NULL) {
-                    philo->left = &Locks[i];
-                } else {
-                    philo->right = &Locks[i];
-                    break;
-                }
-            }
-
-        }
-        if (philo->right == NULL) {
-            if (philo->left != NULL) {
-                printf("%s put down chopstick\n", philo->name);
-                pthread_mutex_unlock(philo->left);
-            }
-            continue;
-        }
-        break;
+void get_chopsticks(int i) {
+    if (pthread_mutex_lock(&Locks[i]) != 0) {
+        perror("Getting chopstick");
+        cleanup(EXIT_FAILURE);
+    } else {
+        printf("%s picked up left chopstick %u\n", PhilosopherNames[i], i);
+    }
+    if (pthread_mutex_lock(&Locks[(i+1)%5]) != 0) {
+        perror("Getting chopstick");
+        cleanup(EXIT_FAILURE);
+    } else {
+        printf("%s picked up right chopstick %u\n", PhilosopherNames[i],
+               (i+1)%5);
     }
 }
 
-void put_chopsticks(struct philosopher *philo) {
-    if (pthread_mutex_unlock(philo->left) != 0) {
+void put_chopsticks(int i) {
+    if (pthread_mutex_unlock(&Locks[i]) != 0) {
         perror("Unlocking first chopstick");
         cleanup(EXIT_FAILURE);
     }
-    if (pthread_mutex_unlock(philo->right) != 0) {
-        perror("Unlocking first chopstick");
+    if (pthread_mutex_unlock(&Locks[(i+1)%5]) != 0) {
+        perror("Unlocking second chopstick");
         cleanup(EXIT_FAILURE);
-
     }
 }
 
@@ -74,17 +62,16 @@ void cleanup(int exit_val) {
 
 void *loop(void *input) {
     unsigned i = (uintptr_t)input;
-    struct philosopher *philo = &Philosophers[i];
-    philo->name = PhilosopherNames[i];
+    char *name = PhilosopherNames[i];
     while (true) {
-        printf("%s is starting to think.\n", philo->name);
+        printf("%s is starting to think.\n", name);
         think();
-        printf("%s is done thinking.\n", philo->name);
-        get_chopsticks(philo);
-        printf("%s is starting to eat.\n", philo->name);
+        printf("%s is done thinking.\n", name);
+        get_chopsticks(i);
+        printf("%s is starting to eat.\n", name);
         eat();
-        printf("%s is done eating.\n", philo->name);
-        put_chopsticks(philo);
+        printf("%s is done eating.\n", name);
+        put_chopsticks(i);
     }
     return NULL;
 }

@@ -42,42 +42,33 @@ bool are_all(int begin, int end, bool (*f)(int)) {
 }
 
 int main() {
-
-    struct philosopher philo = {
-        .name = "testing",
-        .left = NULL,
-        .right = NULL,
-    };
-    struct philosopher philo2 = {
-        .name = "testing",
-        .left = NULL,
-        .right = NULL,
-    };
+    int philo0 = 0;
+    int philo2 = 2;
 
     // Initial condition
     EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
-    get_chopsticks(&philo);
+    get_chopsticks(philo0);
 
     EXPECT_EQ(are_all(0, 2, is_locked), true);
     EXPECT_EQ(are_all(2, NUM_FORKS, is_unlocked), true);
 
-    put_chopsticks(&philo);
+    put_chopsticks(philo0);
 
     EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
-    get_chopsticks(&philo);
+    get_chopsticks(philo0);
 
     EXPECT_EQ(are_all(0, 2, is_locked), true);
     EXPECT_EQ(are_all(2, NUM_FORKS, is_unlocked), true);
 
-    get_chopsticks(&philo2);
+    get_chopsticks(philo2);
 
     EXPECT_EQ(are_all(0, 4, is_locked), true);
     EXPECT_EQ(are_all(4, NUM_FORKS, is_unlocked), true);
 
-    put_chopsticks(&philo);
-    put_chopsticks(&philo2);
+    put_chopsticks(philo0);
+    put_chopsticks(philo2);
     EXPECT_EQ(are_all(0, NUM_FORKS, is_unlocked), true);
 
     return RETURN_VALUE;
