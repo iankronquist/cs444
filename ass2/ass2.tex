@@ -1,0 +1,276 @@
+\documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{color}
+\usepackage{anysize}
+\usepackage{hyperref}
+\usepackage[backend=bibtex]{biblatex}
+\usepackage{amsmath}
+\marginsize{2cm}{2cm}{2cm}{2cm}
+\addbibresource{bib.bib}
+
+\lstdefinelanguage
+   [x86Extended]{Assembler}     % add an "x86Extended dialect of Assembler
+   [x86masm]{Assembler}         % based on the "x86masm" dialect
+   % Define new keywords
+   {morekeywords={rdrand, cpuid}}
+
+\lstdefinestyle{customc}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{OliveGreen},
+  commentstyle=\itshape\color{Fuchsia},
+  identifierstyle=\color{black},
+  stringstyle=\color{Bittersweet},
+}
+
+\lstdefinestyle{customasm}{
+  belowcaptionskip=1\baselineskip,
+  frame=L,
+  xleftmargin=\parindent,
+  language=[x86masm]Assembler,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{Fuchsia},
+}
+
+\lstset{escapechar=@,style=customc}
+
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Oregon State University \par}
+    \vspace{1cm}
+    {\scshape\Large CS 444 Operating Systems II\par}
+    \vspace{1.5cm}
+    {\huge\bfseries Assignment II: I/O Elevators\par}
+    \vspace{2cm}
+    {\Large\itshape Ian Kronquist\par}
+    \vfill
+    \par
+    Professor~Kevin \textsc{McGrath}
+
+    \vfill
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
+
+
+\author{\IEEEauthorblockN{Ian Kronquist}
+\IEEEauthorblockA{School of Electrical and\\Computer Science\\
+Oregon State University\\
+Corvallis, Oregon\\
+kronquii@oregonstate.edu}}
+
+
+\begin{abstract}
+In this project I studied various I/O schedulers in the Linux Kernel source code so I could implement a scheduler which uses the C-LOOK algorithm.
+
+\end{abstract}
+
+\bigskip
+\bigskip
+\bigskip
+
+\section{What's the Point?}
+The purpose of this assignment was to teach us to read and understand complicated and often poorly documented source code, and to understand how to write a Linux Kernel module. I also learned about the Linux configuration system. We also learned how the Shortest-Seek-Time-First, LOOK, and C-LOOK algorithms work.
+\section{Personal Approach}
+I started by reading the chapter on I/O schedulers so I could familiarize myself with how Linux's pluggable architecture works. Then I read several different example schedulers including the \texttt{noop} and \texttt{deadline} schedulers, as well as parts of the Linus elevator. I also read about Linux's linked lists, rb-trees, bio blocks, and request structures so I could understand the data structures I would use.
+
+I started by copying the \texttt{noop} scheduler and renaming it. I then edited several \texttt{Kconfig} files to activate my new scheduler. I then had to consult the QEMU manual pages again to figure out how to disable virtio. I changed the command to use an \texttt{ide} controller  and the texttt{hda} hard disk. I also changed the networking option to forward port 7222 on the os-clas server to port 22 so I could copy my test script onto the virtual machine\cite{qemu(1)}.
+
+\lstset{language=bash,caption={QEMU Command Invocation},label=aa}
+\begin{lstlisting}
+qemu-system-i386  -nographic -kernel ./linux-yocto-3.14/arch/x86/boot/bzImage -drive file=core-image-lsb-sdk-qemux86.ext3,if=ide -enable-kvm -usb -localtime --no-reboot --append "root=/dev/hda rw console=ttyS0 debug" -redir tcp:7222::22
+\end{lstlisting}
+
+I then read more about the LOOK and C-LOOK algorithms. I decided to start by implementing the most simple one, the C-LOOK algorithm. This algorithm sweeps from one end of the hard disk to the other, and when it gets to the end it starts over again from the beginning. I implemented this with a simple linked list which was kept in sorted order. When dispatching the request I would iterate through the list until I reached a request which was greater than the current sector number. The flaw with this approach is that it's an $O(n)$ algorithm. It is incredibly inefficient and ther are several nasty edge cases. Nonetheless, this was a full fledged working implementation with front merging. I decided instead to reimplement the entire module using rb-trees.
+\lstset{language=C,caption={Test Script},label=aa}
+\begin{lstlisting}
+// Choose the next request to service
+static int look_dispatch(struct request_queue *q, int force)
+{
+    sector_t position;
+    struct list_head *entry;
+    // The elevator data is a void*
+    struct look_data *ld = q->elevator->elevator_data;
+#if DEBUG
+    printk("look_dispatch\n");
+#endif
+#if DEBUG
+    print_list(ld);
+#endif
+    if (!list_empty(&ld->queue)) {
+        struct request *rq;
+        rq = list_entry(ld->queue.next, struct request, queuelist);
+        // Get the current position of the read head
+        // For each entry
+        list_for_each(entry, &ld->queue) {
+            // Unwrap the current request and get its position
+            struct request *rq = list_entry(entry, struct request, queuelist);
+            position = blk_rq_pos(rq);
+            // If the position in the queue is greater than the current one
+            if (position > ld->last_serviced) {
+                // Go backward one step
+                entry = entry->prev;
+                rq = list_entry(entry, struct request, queuelist);
+                position = blk_rq_pos(rq);
+                break;
+            }
+        }
+        // Remove the entry
+        list_del_init(&rq->queuelist);
+        // Dispatch the request
+        elv_dispatch_sort(q, rq);
+        // Update the last serviced position
+        ld->last_serviced = position;
+        return 1;
+    }
+    return 0;
+}
+\end{lstlisting}
+
+Red-Black tree traversal is an $O(log n)$ operation and is significantly faster than linear search in the general case. In this implementation I do not keep a queue at all. Instead, I drew inspiration from the \texttt{deadline} scheduler and keep pending requests in a self balancing tree. The Shortest Seek Time First algorithm dictates that the next request should be the closest one to the current read position. To find the next closest request, traverse the tree searching for sectors as close as possible to the current value. Keep track of the closest request seen so far. When the algorithm reaches the leaf of the tree it returns the closest sector it has seen so far. Since this algorithm always traverses the tree until it reaches a leaf it has a $\Theta(log n)$ runtime. To implement this faster approach I started with the \texttt{elv\_rb\_find} function in \texttt{block/elevator.c} and made significant modifications.
+
+\begin{lstlisting}
+// Walk the rbtree starting at root and find the closest value to sector
+// Returns NULL if the tree is empty
+// The macro SSTF controls whether we consider branches less than sector.
+// Set SSTF to 1 to make the algorithm SSTF
+// Setting it to 0 makes the algorithm a C-Look variant
+static struct request *
+look_elv_rb_find_closest(struct rb_root *root, sector_t sector)
+{
+	struct rb_node *n = root->rb_node;
+	struct request *rq, *closest_rq;
+	sector_t closest_pos_diff, pos;
+
+	if (n == NULL) {
+		return NULL;
+	}
+	// Start the search with the root
+	closest_rq = rb_entry(n, struct request, rb_node);
+	pos = blk_rq_pos(closest_rq);
+	closest_pos_diff = sector > pos ? sector - pos : pos - sector;
+	// If the difference from the root position is 0, return the root
+	if (unlikely(closest_pos_diff == 0)) {
+		return closest_rq;
+	}
+
+	while (n) {
+		rq = rb_entry(n, struct request, rb_node);
+		pos = blk_rq_pos(rq);
+
+		if (sector < pos) {
+			n = n->rb_left;
+			if (pos - sector <  closest_pos_diff) {
+				closest_pos_diff = pos - sector;
+				closest_rq = rq;
+			}
+		} else if (sector > pos) {
+			n = n->rb_right;
+#if SSTF
+			if (sector - pos <  closest_pos_diff) {
+				closest_pos_diff = sector - pos;
+				closest_rq = rq;
+			}
+#endif
+		} else {
+			// You can't get any closer than 0.
+			return rq;
+		}
+	}
+	return closest_rq;
+}
+\end{lstlisting}
+
+Another upshot of this algorithm is that it is trivial to transform it into a variant of C-LOOK. C-LOOK differs from SSTF in that instead of choosing the absolute closest request to the current position, it chooses the closest one which is larger than the current position. This way the read head always swings toward higher sectors until it runs out of requests to service. To implement this algorithm, only keep track of requests with sectors greater than the current algorithm. In my implementation, if the read head sector is greater all of the requests, it will choose the root of the tree, and not sector 0. In my implementation this behavior can be selected at compile time by setting the macro \texttt{SSTF} to 0. I decided not to use this implementation because it could lead to starvation of low numbered sectors under heavy workloads.
+
+In this implementation I decided to follow an approach for merging very similar to the \texttt{deadline} scheduler. I attempt to find any sectors which come after the current sector and then perform a front merge.
+
+\begin{lstlisting}
+static int look_merge(struct request_queue *q, struct request **req,
+		struct bio *bio)
+{
+	struct look_data *ld = q->elevator->elevator_data;
+	struct request *rq;
+	sector_t position = bio_end_sector(bio);
+#if DEBUG
+	printk("look_merge\n");
+#endif
+	rq = elv_rb_find(&ld->root, position);
+	if (rq != NULL) {
+		*req = rq;
+		return ELEVATOR_FRONT_MERGE;
+	}
+	return ELEVATOR_NO_MERGE;
+}
+\end{lstlisting}
+
+\section{Testing}
+In order to test the correctness of my solution I wrote a simple shell script to exercise the functionality of the I/O scheduler. This script activates my \texttt{look} scheduler, reads 9MB or random data and writes it to the disk, and then copies the data and checks to see if they differ. If they differ it writes that the test failed. I put this script in a bash while loop and left it running for a significant period of time as a stability test, which apparently isn't too far different than how the Kernel developers do it\cite{lkml}.
+\lstset{language=bash,caption={Test Script},label=aa}
+\begin{lstlisting}
+#!/bin/bash
+
+cat /sys/block/hda/queue/scheduler
+echo look > /sys/block/hda/queue/scheduler
+cat /sys/block/hda/queue/scheduler
+sync
+dd if=/dev/urandom of=./test_data_1 bs=1024 count=8192
+sync
+cp test_data_1 test_data_2
+sync
+diff test_data_1 test_data_2
+if [[ \$? != 0 ]]; then
+	echo "Test failed!"
+else
+	echo "Test passed!"
+fi
+rm test_data_1 test_data_2
+\end{lstlisting}
+
+\section{What I Learned}
+I learned about the difference between the C-LOOK, LOOK, and SSTF algorithms, as well as how the Kernel's pluggable I/O scheduler system works. I learned a bit about the mysteries of the KConfig system and how the brilliant curses menuconfig is written.
+
+
+\section{Work Log}
+\begin{tabular}{|p{5cm}|p{5cm}|p{5cm}}
+    \textbf{Approximate Start Time} & \textbf{Approximate Duration} & \textbf{Activity} \\
+    \hline
+    13:00 Friday, April 23 & 1 hour & Read Love's book and the noop scheduler's source code \\
+    13:00 Sunday, April 25 & 3 hours & Read deadline scheduler and noop source code. Read about Kconfig. Begin to implement C-LOOK.\\
+    18:00 Sunday, April 25 & 5 hours & Implement C-LOOK without merging.\\
+    12:00 Sunday, April 25 & 1 hour and a half & Implement front merging.\\
+    16:00 Sunday, April 25 & 2 hours & Implement rb-tree version of SSTF while helping friend on Senior Project work.\\
+\end{tabular}
+
+\bigskip
+\bigskip
+
+\section{Git Logs}
+\begin{tabular}{l l l}\textbf{Detail} & \textbf{Author} & \textbf{Description}\\
+\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/356a3e1fde11190febb8ace3cdab8694848ed220}{356a3e1} & Greg Kroah-Hartman & Linux 3.14.26\\\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/4a5914ec16ba75f6d0ca454ebef6ef5bfe244f39}{4a5914e} & Ian Kronquist & First stab at Look Io scheduler\\\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/2a763aba79ab22989d4a32a0c365919479a8cbe8}{2a763ab} & Ian Kronquist & Working Look algorithm\\\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/aa4fb5ad6dfbd6f5e9984b47b5cbe315eda7831a}{aa4fb5a} & Ian Kronquist & Add front merging code\\\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/19513bfbad0a7cc0d04c1b7ae783a96bdc98fe1e}{19513bf} & Ian Kronquist & Rewrite look scheduler to use rbtree\\\hline
+\href{git://git.yoctoproject.org/linux-yocto-3.14/commit/7d1fa21a1e4dccf93fba9a1763da5303d97af390}{7d1fa21} & Ian Kronquist & Activate SSTF\\\hline
+\end{tabular}
+
+
+\clearpage
+\printbibliography
+
+\end{document}
+\bibliography{bib.bib}
+\bibliographystyle{IEEEtran}
