@@ -1,0 +1,844 @@
+From 4a5914ec16ba75f6d0ca454ebef6ef5bfe244f39 Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Sun, 24 Apr 2016 15:23:06 -0700
+Subject: [PATCH 1/4] First stab at Look Io scheduler
+
+---
+ block/Kconfig.iosched |  11 ++++
+ block/Makefile        |   1 +
+ block/look-iosched.c  | 153 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 165 insertions(+)
+ create mode 100644 block/look-iosched.c
+
+diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
+index 421bef9..8533ad2 100644
+--- a/block/Kconfig.iosched
++++ b/block/Kconfig.iosched
+@@ -32,6 +32,13 @@ config IOSCHED_CFQ
+ 
+ 	  This is the default I/O scheduler.
+ 
++config IOSCHED_LOOK
++	tristate "Look I/O scheduler"
++	default y
++	---help---
++		help
++
++
+ config CFQ_GROUP_IOSCHED
+ 	bool "CFQ Group Scheduling support"
+ 	depends on IOSCHED_CFQ && BLK_CGROUP
+@@ -49,6 +56,10 @@ choice
+ 	config DEFAULT_DEADLINE
+ 		bool "Deadline" if IOSCHED_DEADLINE=y
+ 
++	config DEFAULT_LOOK
++		bool "LOOK" if IOSCHED_LOOK=y
++
++
+ 	config DEFAULT_CFQ
+ 		bool "CFQ" if IOSCHED_CFQ=y
+ 
+diff --git a/block/Makefile b/block/Makefile
+index 20645e8..c92ddaa 100644
+--- a/block/Makefile
++++ b/block/Makefile
+@@ -16,6 +16,7 @@ obj-$(CONFIG_BLK_DEV_THROTTLING)	+= blk-throttle.o
+ obj-$(CONFIG_IOSCHED_NOOP)	+= noop-iosched.o
+ obj-$(CONFIG_IOSCHED_DEADLINE)	+= deadline-iosched.o
+ obj-$(CONFIG_IOSCHED_CFQ)	+= cfq-iosched.o
++obj-$(CONFIG_IOSCHED_LOOK)	+= look-iosched.o
+ 
+ obj-$(CONFIG_BLOCK_COMPAT)	+= compat_ioctl.o
+ obj-$(CONFIG_BLK_DEV_INTEGRITY)	+= blk-integrity.o
+diff --git a/block/look-iosched.c b/block/look-iosched.c
+new file mode 100644
+index 0000000..eb60746
+--- /dev/null
++++ b/block/look-iosched.c
+@@ -0,0 +1,153 @@
++#include <linux/blkdev.h>
++#include <linux/elevator.h>
++#include <linux/bio.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/init.h>
++#include <linux/list_sort.h>
++
++struct look_data {
++	struct list_head queue;
++	//struct list_head *cur_pos;
++};
++
++
++// Choose the next request to service
++static int look_dispatch(struct request_queue *q, int force)
++{
++	// Get the current position of the read head
++	sector_t position = rq_end_sector(rq);
++
++	// For each entry
++	struct list_head *entry;
++	list_for_each(entry, &ld->queue) {
++		// Unwrap the current request and get its position
++		struct request *rq = list_entry(entry, struct request, queuelist);
++		position_i = blk_rq_pos(rqi);
++		// If the position in the queue is greater than the current one
++		if (position_i > position) {
++			//ld->cur_pos = entry;
++			// Go backward one step
++			entry = list_prev_entry(entry);
++			rq = list_entry(entry, struct request, queuelist);
++
++			// Remove the entry
++			list_del(entry);
++			// Dispatch the request
++			elv_dispatch_sort(q, rq);
++			return 1;
++		}
++	}
++	// If we couldn't find any requests starting at the beginning
++	return 0;
++}
++
++// From plug_rq_cmp in  block/blk-core.c
++static int rq_cmp(void *priv, struct list_head *a, struct list_head *b)
++{
++	struct request *rqa = container_of(a, struct request, queuelist);
++	struct request *rqb = container_of(b, struct request, queuelist);
++
++	return blk_rq_pos(rqa) - blk_rq_pos(rqb);
++}
++
++// Use the elv_attempt_insert_merge function to insert the request rq into the queue
++// q in the right spot.
++static void look_add_request(struct request_queue *q, struct request *rq)
++{
++	// The elevator data is a void*
++	struct noop_data *nd = q->elevator->elevator_data;
++
++	/*
++	// Acquire the lock
++	spin_lock_irq(q->queue_lock);
++	// Attempt to merge the request into an existing request. Returns true if
++	// it succeeded.
++	bool merged = elv_attempt_insert_merge(r, rq);
++	spin_unlock_irq(q->queue_lock);
++	 */
++	// If we didn't merge, insert it into the list in sorted order.
++	//if (!merged) {
++	list_add(&rq->queuelist, &nd->queue);
++	list_sort(NULL, &nq->queue, rq_cmp);
++	//}
++}
++
++
++static int look_init_queue(struct request_queue *q, struct elevator_type *e)
++{
++	struct look_data *ld;
++	struct elevator_queue *eq;
++	// Allocate the elevator
++	eq = elevator_alloc(q, e);
++	if (eq == NULL)
++		return -ENOMEM;
++
++	// Allocate memory for the look data.
++	ld = kmalloc_node(sizeof(*nd), GFP_KERNEL, q->nore);
++	if (ld == NULL) {
++		kobject_put(&eq->kobj);
++		return -ENOMEM;
++	}
++	// Set the elevator queue's data to the look data
++	eq->elevator_data = ld;
++
++	// Initialize the look data queue
++	INIT_LIST_HEAD(&ld->queue);
++	ld->cur_pos = &ld->queue;
++	// Acquire the lock and set the queue's elevator queue
++	spin_lock_irq(q->queue_lock);
++	q->elevator = eq;
++	spin_unlock_irq(q->queue_lock);
++	return 0;
++}
++
++static void look_exit_queue(struct elevator_queue *e)
++{
++	struct look_data *ld = e->elevator_data;
++	// If we're trying to exit and we have an empty queue there's a bug.
++	BUG_ON(!list_empty(&ld->queue));
++	// Free the look data
++	kfree(ld);
++}
++
++static struct elevator_type elevator_look = {
++	.ops = {
++		// Called to see if bio can be merged with an already pending request
++		//        .elevator_merge_fn          = look_merge,
++		// Called after requests are merged
++		//		.elevator_merge_req_fn		= look_merged_requests,
++		// Called when readying the next request for the driver
++		.elevator_dispatch_fn		= look_dispatch,
++		// Add a new request to the queue
++		.elevator_add_req_fn		= look_add_request,
++		/*
++		// Get the next request
++		.elevator_former_req_fn		= elv_former_request,
++		// Get the previous request
++		.elevator_latter_req_fn		= elv_latter_request,
++		*/
++		.elevator_init_fn		= look_init_queue,
++		.elevator_exit_fn		= look_exit_queue,
++	},
++	.elevator_name = "look",
++	.elevator_owner = THIS_MODULE,
++};
++
++static int __init look_init(void)
++{
++	return elv_register(&elevator_look);
++}
++
++static void __exit look_exit(void)
++{
++	elv_unregister(&elevator_look);
++}
++
++module_init(look_init);
++module_exit(look_exit);
++
++
++MODULE_AUTHOR("Ian Kronquist");
++MODULE_LICENSE("Dual BSD GPL");
++MODULE_DESCRIPTION("Look I/O scheduler");
+-- 
+1.7.12.4
+
+
+From 2a763aba79ab22989d4a32a0c365919479a8cbe8 Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Sun, 24 Apr 2016 23:19:21 -0700
+Subject: [PATCH 2/4] Working Look algorithm
+
+---
+ block/Kconfig.iosched |  2 +-
+ block/look-iosched.c  | 90 ++++++++++++++++++++++++++++++---------------------
+ 2 files changed, 54 insertions(+), 38 deletions(-)
+
+diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
+index 8533ad2..a588f6a 100644
+--- a/block/Kconfig.iosched
++++ b/block/Kconfig.iosched
+@@ -59,7 +59,6 @@ choice
+ 	config DEFAULT_LOOK
+ 		bool "LOOK" if IOSCHED_LOOK=y
+ 
+-
+ 	config DEFAULT_CFQ
+ 		bool "CFQ" if IOSCHED_CFQ=y
+ 
+@@ -73,6 +72,7 @@ config DEFAULT_IOSCHED
+ 	default "deadline" if DEFAULT_DEADLINE
+ 	default "cfq" if DEFAULT_CFQ
+ 	default "noop" if DEFAULT_NOOP
++	default "look" if DEFAULT_LOOK
+ 
+ endmenu
+ 
+diff --git a/block/look-iosched.c b/block/look-iosched.c
+index eb60746..37c6db4 100644
+--- a/block/look-iosched.c
++++ b/block/look-iosched.c
+@@ -11,34 +11,51 @@ struct look_data {
+ 	//struct list_head *cur_pos;
+ };
+ 
++void print_list(struct look_data *ld) {
++	struct list_head *entry = &ld->queue;
++	if (!list_empty(&ld->queue)) {
++		list_for_each(entry, &ld->queue) {
++			struct request *rq = list_entry(entry, struct request, queuelist);
++			printk("%lu, ", blk_rq_pos(rq));
++		}
++	}
++	printk("--\n");
++}
++
+ 
+ // Choose the next request to service
+ static int look_dispatch(struct request_queue *q, int force)
+ {
+-	// Get the current position of the read head
+-	sector_t position = rq_end_sector(rq);
+-
+-	// For each entry
++	sector_t position, position_i;
+ 	struct list_head *entry;
+-	list_for_each(entry, &ld->queue) {
+-		// Unwrap the current request and get its position
+-		struct request *rq = list_entry(entry, struct request, queuelist);
+-		position_i = blk_rq_pos(rqi);
+-		// If the position in the queue is greater than the current one
+-		if (position_i > position) {
+-			//ld->cur_pos = entry;
+-			// Go backward one step
+-			entry = list_prev_entry(entry);
+-			rq = list_entry(entry, struct request, queuelist);
+-
+-			// Remove the entry
+-			list_del(entry);
+-			// Dispatch the request
+-			elv_dispatch_sort(q, rq);
+-			return 1;
++	// The elevator data is a void*
++	struct look_data *ld = q->elevator->elevator_data;
++	// print_list(ld);
++	if (!list_empty(&ld->queue)) {
++		struct request *rq;
++		rq = list_entry(ld->queue.next, struct request, queuelist);
++		// Get the current position of the read head
++		position = rq_end_sector(rq);
++		// For each entry
++		list_for_each(entry, &ld->queue) {
++			// Unwrap the current request and get its position
++			struct request *rq = list_entry(entry, struct request, queuelist);
++			position_i = blk_rq_pos(rq);
++			// If the position in the queue is greater than the current one
++			if (position_i > position) {
++				//ld->cur_pos = entry;
++				// Go backward one step
++				entry = entry->prev;
++				rq = list_entry(entry, struct request, queuelist);
++				break;
++			}
+ 		}
++		// Remove the entry
++		list_del_init(&rq->queuelist);
++		// Dispatch the request
++		elv_dispatch_sort(q, rq);
++		return 1;
+ 	}
+-	// If we couldn't find any requests starting at the beginning
+ 	return 0;
+ }
+ 
+@@ -56,26 +73,16 @@ static int rq_cmp(void *priv, struct list_head *a, struct list_head *b)
+ static void look_add_request(struct request_queue *q, struct request *rq)
+ {
+ 	// The elevator data is a void*
+-	struct noop_data *nd = q->elevator->elevator_data;
++	struct look_data *ld = q->elevator->elevator_data;
+ 
+-	/*
+-	// Acquire the lock
+-	spin_lock_irq(q->queue_lock);
+-	// Attempt to merge the request into an existing request. Returns true if
+-	// it succeeded.
+-	bool merged = elv_attempt_insert_merge(r, rq);
+-	spin_unlock_irq(q->queue_lock);
+-	 */
+-	// If we didn't merge, insert it into the list in sorted order.
+-	//if (!merged) {
+-	list_add(&rq->queuelist, &nd->queue);
+-	list_sort(NULL, &nq->queue, rq_cmp);
+-	//}
++	list_add(&rq->queuelist, &ld->queue);
++	list_sort(NULL, &ld->queue, rq_cmp);
+ }
+ 
+ 
+ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ {
++    printk("initing i/o\n");
+ 	struct look_data *ld;
+ 	struct elevator_queue *eq;
+ 	// Allocate the elevator
+@@ -84,7 +91,7 @@ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ 		return -ENOMEM;
+ 
+ 	// Allocate memory for the look data.
+-	ld = kmalloc_node(sizeof(*nd), GFP_KERNEL, q->nore);
++	ld = kmalloc_node(sizeof(*ld), GFP_KERNEL, q->node);
+ 	if (ld == NULL) {
+ 		kobject_put(&eq->kobj);
+ 		return -ENOMEM;
+@@ -94,7 +101,7 @@ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ 
+ 	// Initialize the look data queue
+ 	INIT_LIST_HEAD(&ld->queue);
+-	ld->cur_pos = &ld->queue;
++	//ld->cur_pos = &ld->queue;
+ 	// Acquire the lock and set the queue's elevator queue
+ 	spin_lock_irq(q->queue_lock);
+ 	q->elevator = eq;
+@@ -102,6 +109,15 @@ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ 	return 0;
+ }
+ 
++/* FIXME In progress
++static int look_merge(struct request_queue *q, struct request **req,
++		struct bio *bio)
++{
++	struct look_data *ld = e->elevator_data;
++	sector_t sect = bio_end_sector(bio);
++}
++*/
++
+ static void look_exit_queue(struct elevator_queue *e)
+ {
+ 	struct look_data *ld = e->elevator_data;
+-- 
+1.7.12.4
+
+
+From aa4fb5ad6dfbd6f5e9984b47b5cbe315eda7831a Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Mon, 25 Apr 2016 13:30:53 -0700
+Subject: [PATCH 3/4] Add front merging code
+
+---
+ block/look-iosched.c | 83 ++++++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 68 insertions(+), 15 deletions(-)
+
+diff --git a/block/look-iosched.c b/block/look-iosched.c
+index 37c6db4..b3c0158 100644
+--- a/block/look-iosched.c
++++ b/block/look-iosched.c
+@@ -6,47 +6,54 @@
+ #include <linux/init.h>
+ #include <linux/list_sort.h>
+ 
++#define DEBUG 1
++
+ struct look_data {
+ 	struct list_head queue;
+-	//struct list_head *cur_pos;
++	sector_t last_serviced;
+ };
+ 
+ void print_list(struct look_data *ld) {
+ 	struct list_head *entry = &ld->queue;
++	printk("[");
+ 	if (!list_empty(&ld->queue)) {
+ 		list_for_each(entry, &ld->queue) {
+ 			struct request *rq = list_entry(entry, struct request, queuelist);
+-			printk("%lu, ", blk_rq_pos(rq));
++			printk("%llx, ", blk_rq_pos(rq));
+ 		}
+ 	}
+-	printk("--\n");
++	printk("]\n");
+ }
+ 
+ 
+ // Choose the next request to service
+ static int look_dispatch(struct request_queue *q, int force)
+ {
+-	sector_t position, position_i;
++	sector_t position;
+ 	struct list_head *entry;
+ 	// The elevator data is a void*
+ 	struct look_data *ld = q->elevator->elevator_data;
+-	// print_list(ld);
++#if DEBUG
++	printk("look_dispatch\n");
++#endif
++#if DEBUG
++	print_list(ld);
++#endif
+ 	if (!list_empty(&ld->queue)) {
+ 		struct request *rq;
+ 		rq = list_entry(ld->queue.next, struct request, queuelist);
+ 		// Get the current position of the read head
+-		position = rq_end_sector(rq);
+ 		// For each entry
+ 		list_for_each(entry, &ld->queue) {
+ 			// Unwrap the current request and get its position
+ 			struct request *rq = list_entry(entry, struct request, queuelist);
+-			position_i = blk_rq_pos(rq);
++			position = blk_rq_pos(rq);
+ 			// If the position in the queue is greater than the current one
+-			if (position_i > position) {
+-				//ld->cur_pos = entry;
++			if (position > ld->last_serviced) {
+ 				// Go backward one step
+ 				entry = entry->prev;
+ 				rq = list_entry(entry, struct request, queuelist);
++				position = blk_rq_pos(rq);
+ 				break;
+ 			}
+ 		}
+@@ -54,6 +61,8 @@ static int look_dispatch(struct request_queue *q, int force)
+ 		list_del_init(&rq->queuelist);
+ 		// Dispatch the request
+ 		elv_dispatch_sort(q, rq);
++		// Update the last serviced position
++		ld->last_serviced = position;
+ 		return 1;
+ 	}
+ 	return 0;
+@@ -65,6 +74,9 @@ static int rq_cmp(void *priv, struct list_head *a, struct list_head *b)
+ 	struct request *rqa = container_of(a, struct request, queuelist);
+ 	struct request *rqb = container_of(b, struct request, queuelist);
+ 
++#if DEBUG
++	printk("rq_cmp\n");
++#endif
+ 	return blk_rq_pos(rqa) - blk_rq_pos(rqb);
+ }
+ 
+@@ -75,6 +87,10 @@ static void look_add_request(struct request_queue *q, struct request *rq)
+ 	// The elevator data is a void*
+ 	struct look_data *ld = q->elevator->elevator_data;
+ 
++#if DEBUG
++	printk("look_add_request\n");
++#endif
++
+ 	list_add(&rq->queuelist, &ld->queue);
+ 	list_sort(NULL, &ld->queue, rq_cmp);
+ }
+@@ -82,9 +98,11 @@ static void look_add_request(struct request_queue *q, struct request *rq)
+ 
+ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ {
+-    printk("initing i/o\n");
+ 	struct look_data *ld;
+ 	struct elevator_queue *eq;
++#if DEBUG
++	printk("look_init_queue\n");
++#endif
+ 	// Allocate the elevator
+ 	eq = elevator_alloc(q, e);
+ 	if (eq == NULL)
+@@ -106,21 +124,56 @@ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ 	spin_lock_irq(q->queue_lock);
+ 	q->elevator = eq;
+ 	spin_unlock_irq(q->queue_lock);
++	ld->last_serviced = 0;
+ 	return 0;
+ }
+ 
+-/* FIXME In progress
+ static int look_merge(struct request_queue *q, struct request **req,
+ 		struct bio *bio)
+ {
+-	struct look_data *ld = e->elevator_data;
++	sector_t position;
++	struct list_head *entry;
++	struct look_data *ld = q->elevator->elevator_data;
+ 	sector_t sect = bio_end_sector(bio);
++#if DEBUG
++	printk("look_merge\n");
++#endif
++	if (!list_empty(&ld->queue)) {
++		// For each entry
++		list_for_each(entry, &ld->queue) {
++			struct request *rq = list_entry(entry, struct request, queuelist);
++			position = blk_rq_pos(rq);
++			printk("thinking of merging %llx and %llx\n", position, sect);
++			if (position == sect) {
++				*req = rq;
++#if DEBUG
++				printk("Front merging %llx and %llx\n", position, sect);
++#endif
++				return ELEVATOR_FRONT_MERGE;
++			}
++		}
++	}
++#if DEBUG
++	printk("No merge necessary\n");
++#endif
++	return ELEVATOR_NO_MERGE;
++}
++
++static void look_merged_requests(struct request_queue *q, struct request *rq,
++				 struct request *next)
++{
++#if DEBUG
++	printk("look_merged_requests\n");
++#endif
++	list_del_init(&next->queuelist);
+ }
+-*/
+ 
+ static void look_exit_queue(struct elevator_queue *e)
+ {
+ 	struct look_data *ld = e->elevator_data;
++#if DEBUG
++	printk("look_exit_queue\n");
++#endif
+ 	// If we're trying to exit and we have an empty queue there's a bug.
+ 	BUG_ON(!list_empty(&ld->queue));
+ 	// Free the look data
+@@ -130,9 +183,9 @@ static void look_exit_queue(struct elevator_queue *e)
+ static struct elevator_type elevator_look = {
+ 	.ops = {
+ 		// Called to see if bio can be merged with an already pending request
+-		//        .elevator_merge_fn          = look_merge,
++		.elevator_merge_fn          = look_merge,
+ 		// Called after requests are merged
+-		//		.elevator_merge_req_fn		= look_merged_requests,
++		.elevator_merge_req_fn		= look_merged_requests,
+ 		// Called when readying the next request for the driver
+ 		.elevator_dispatch_fn		= look_dispatch,
+ 		// Add a new request to the queue
+-- 
+1.7.12.4
+
+
+From 19513bfbad0a7cc0d04c1b7ae783a96bdc98fe1e Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Mon, 25 Apr 2016 17:59:31 -0700
+Subject: [PATCH 4/4] Rewrite look scheduler to use rbtree
+
+---
+ block/look-iosched.c | 158 +++++++++++++++++++++++++--------------------------
+ 1 file changed, 79 insertions(+), 79 deletions(-)
+
+diff --git a/block/look-iosched.c b/block/look-iosched.c
+index b3c0158..b0ea522 100644
+--- a/block/look-iosched.c
++++ b/block/look-iosched.c
+@@ -4,80 +4,94 @@
+ #include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/init.h>
+-#include <linux/list_sort.h>
++#include <linux/rbtree.h>
+ 
+ #define DEBUG 1
++#define SSTF 0
+ 
+ struct look_data {
+-	struct list_head queue;
++	struct rb_root root;
+ 	sector_t last_serviced;
+ };
+ 
++/*
+ void print_list(struct look_data *ld) {
+-	struct list_head *entry = &ld->queue;
++	struct request *rq, *next_rq;
+ 	printk("[");
+-	if (!list_empty(&ld->queue)) {
+-		list_for_each(entry, &ld->queue) {
+-			struct request *rq = list_entry(entry, struct request, queuelist);
+-			printk("%llx, ", blk_rq_pos(rq));
+-		}
++	rbtree_postorder_for_each_entry_safe(rq, next_rq, ld->root, node) {
++		printk("%llx, ", blk_rq_pos(rq));
+ 	}
+ 	printk("]\n");
+ }
++*/
++
++// Walk the rbtree starting at root and find the closest value to sector
++// Returns NULL if the tree is empty
++// The macro SSTF controls whether we consider branches less than sector.
++// Set SSTF to 1 to make the algorithm SSTF
++// Setting it to 0 makes the algorithm C-Look
++static struct request *
++look_elv_rb_find_closest(struct rb_root *root, sector_t sector)
++{
++	struct rb_node *n = root->rb_node;
++	struct request *rq, *closest_rq;
++	sector_t closest_pos_diff, pos;
++
++	if (n == NULL) {
++		return NULL;
++	}
++	// Start the search with the root
++	closest_rq = rb_entry(n, struct request, rb_node);
++	pos = blk_rq_pos(closest_rq);
++	closest_pos_diff = sector > pos ? sector - pos : pos - sector;
++	// If the difference from the root position is 0, return the root
++	if (unlikely(closest_pos_diff == 0)) {
++		return closest_rq;
++	}
++
++	while (n) {
++		rq = rb_entry(n, struct request, rb_node);
++		pos = blk_rq_pos(rq);
+ 
++		if (sector < pos) {
++			n = n->rb_left;
++			if (pos - sector <  closest_pos_diff) {
++				closest_pos_diff = pos - sector;
++				closest_rq = rq;
++			}
++		} else if (sector > pos) {
++			n = n->rb_right;
++#if SSTF
++			if (sector - pos <  closest_pos_diff) {
++				closest_pos_diff = sector - pos;
++				closest_rq = rq;
++			}
++#endif
++		} else {
++			// You can't get any closer than 0.
++			return rq;
++		}
++	}
++	return closest_rq;
++}
+ 
+ // Choose the next request to service
+ static int look_dispatch(struct request_queue *q, int force)
+ {
+-	sector_t position;
+-	struct list_head *entry;
++	struct request *rq;
+ 	// The elevator data is a void*
+ 	struct look_data *ld = q->elevator->elevator_data;
+ #if DEBUG
+ 	printk("look_dispatch\n");
+ #endif
+-#if DEBUG
+-	print_list(ld);
+-#endif
+-	if (!list_empty(&ld->queue)) {
+-		struct request *rq;
+-		rq = list_entry(ld->queue.next, struct request, queuelist);
+-		// Get the current position of the read head
+-		// For each entry
+-		list_for_each(entry, &ld->queue) {
+-			// Unwrap the current request and get its position
+-			struct request *rq = list_entry(entry, struct request, queuelist);
+-			position = blk_rq_pos(rq);
+-			// If the position in the queue is greater than the current one
+-			if (position > ld->last_serviced) {
+-				// Go backward one step
+-				entry = entry->prev;
+-				rq = list_entry(entry, struct request, queuelist);
+-				position = blk_rq_pos(rq);
+-				break;
+-			}
+-		}
+-		// Remove the entry
+-		list_del_init(&rq->queuelist);
+-		// Dispatch the request
+-		elv_dispatch_sort(q, rq);
+-		// Update the last serviced position
+-		ld->last_serviced = position;
+-		return 1;
++	rq = look_elv_rb_find_closest(&ld->root, ld->last_serviced);
++	if (rq == NULL) {
++		return 0;
+ 	}
+-	return 0;
+-}
+-
+-// From plug_rq_cmp in  block/blk-core.c
+-static int rq_cmp(void *priv, struct list_head *a, struct list_head *b)
+-{
+-	struct request *rqa = container_of(a, struct request, queuelist);
+-	struct request *rqb = container_of(b, struct request, queuelist);
+-
+-#if DEBUG
+-	printk("rq_cmp\n");
+-#endif
+-	return blk_rq_pos(rqa) - blk_rq_pos(rqb);
++	ld->last_serviced = blk_rq_pos(rq);
++	elv_dispatch_add_tail(q, rq);
++    elv_rb_del(&ld->root, rq);
++	return 1;
+ }
+ 
+ // Use the elv_attempt_insert_merge function to insert the request rq into the queue
+@@ -91,8 +105,7 @@ static void look_add_request(struct request_queue *q, struct request *rq)
+ 	printk("look_add_request\n");
+ #endif
+ 
+-	list_add(&rq->queuelist, &ld->queue);
+-	list_sort(NULL, &ld->queue, rq_cmp);
++	elv_rb_add(&ld->root, rq);
+ }
+ 
+ 
+@@ -117,55 +130,44 @@ static int look_init_queue(struct request_queue *q, struct elevator_type *e)
+ 	// Set the elevator queue's data to the look data
+ 	eq->elevator_data = ld;
+ 
++
+ 	// Initialize the look data queue
+-	INIT_LIST_HEAD(&ld->queue);
++	//INIT_LIST_HEAD(&ld->queue);
+ 	//ld->cur_pos = &ld->queue;
+ 	// Acquire the lock and set the queue's elevator queue
+ 	spin_lock_irq(q->queue_lock);
+ 	q->elevator = eq;
+ 	spin_unlock_irq(q->queue_lock);
+ 	ld->last_serviced = 0;
++    ld->root = RB_ROOT;
+ 	return 0;
+ }
+ 
+ static int look_merge(struct request_queue *q, struct request **req,
+ 		struct bio *bio)
+ {
+-	sector_t position;
+-	struct list_head *entry;
+ 	struct look_data *ld = q->elevator->elevator_data;
+-	sector_t sect = bio_end_sector(bio);
++	struct request *rq;
++	sector_t position = bio_end_sector(bio);
+ #if DEBUG
+ 	printk("look_merge\n");
+ #endif
+-	if (!list_empty(&ld->queue)) {
+-		// For each entry
+-		list_for_each(entry, &ld->queue) {
+-			struct request *rq = list_entry(entry, struct request, queuelist);
+-			position = blk_rq_pos(rq);
+-			printk("thinking of merging %llx and %llx\n", position, sect);
+-			if (position == sect) {
+-				*req = rq;
+-#if DEBUG
+-				printk("Front merging %llx and %llx\n", position, sect);
+-#endif
+-				return ELEVATOR_FRONT_MERGE;
+-			}
+-		}
++	rq = elv_rb_find(&ld->root, position);
++	if (rq != NULL) {
++		*req = rq;
++		return ELEVATOR_FRONT_MERGE;
+ 	}
+-#if DEBUG
+-	printk("No merge necessary\n");
+-#endif
+ 	return ELEVATOR_NO_MERGE;
+ }
+ 
+ static void look_merged_requests(struct request_queue *q, struct request *rq,
+-				 struct request *next)
++		struct request *next)
+ {
++	struct look_data *ld = q->elevator->elevator_data;
+ #if DEBUG
+ 	printk("look_merged_requests\n");
+ #endif
+-	list_del_init(&next->queuelist);
++	elv_rb_del(&ld->root, rq);
+ }
+ 
+ static void look_exit_queue(struct elevator_queue *e)
+@@ -174,8 +176,6 @@ static void look_exit_queue(struct elevator_queue *e)
+ #if DEBUG
+ 	printk("look_exit_queue\n");
+ #endif
+-	// If we're trying to exit and we have an empty queue there's a bug.
+-	BUG_ON(!list_empty(&ld->queue));
+ 	// Free the look data
+ 	kfree(ld);
+ }
+@@ -218,5 +218,5 @@ module_exit(look_exit);
+ 
+ 
+ MODULE_AUTHOR("Ian Kronquist");
+-MODULE_LICENSE("Dual BSD GPL");
++MODULE_LICENSE("Dual BSD/GPL");
+ MODULE_DESCRIPTION("Look I/O scheduler");
+-- 
+1.7.12.4
+
