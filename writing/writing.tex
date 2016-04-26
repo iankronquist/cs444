@@ -1,0 +1,304 @@
+\documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{color}
+\usepackage{anysize}
+\usepackage{hyperref}
+\usepackage[backend=bibtex]{biblatex}
+\usepackage{amsmath}
+\marginsize{2cm}{2cm}{2cm}{2cm}
+\addbibresource{bib.bib}
+
+\lstdefinelanguage
+   [x86Extended]{Assembler}     % add an "x86Extended dialect of Assembler
+   [x86masm]{Assembler}         % based on the "x86masm" dialect
+   % Define new keywords
+   {morekeywords={rdrand, cpuid}}
+
+\lstdefinestyle{customc}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{OliveGreen},
+  commentstyle=\itshape\color{Fuchsia},
+  identifierstyle=\color{black},
+  stringstyle=\color{Bittersweet},
+}
+
+\lstdefinestyle{customasm}{
+  belowcaptionskip=1\baselineskip,
+  frame=L,
+  xleftmargin=\parindent,
+  language=[x86masm]Assembler,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{Fuchsia},
+}
+
+\lstset{escapechar=@,style=customc}
+
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Oregon State University \par}
+    \vspace{1cm}
+    {\scshape\Large Operating System Feature Comparison \par}
+    \vspace{1.5cm}
+    {\huge\bfseries Processes and Scheduling \par}
+    \vspace{2cm}
+    {\Large\itshape Ian Kronquist \par}
+    \vfill
+    \par
+    Professor~Kevin \textsc{McGrath}
+
+    \vfill
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
+
+
+\author{\IEEEauthorblockN{Ian Kronquist}
+\IEEEauthorblockA{School of Electrical and\\Computer Science\\
+Oregon State University\\
+Corvallis, Oregon\\
+kronquii@oregonstate.edu}}
+
+\bigskip
+
+\section{Introduction}
+For this assignment we will examine processes, threads, and scheduling in four different kernels: Linux, Windows NT, FreeBSD, and the Kernel of Truth.
+Linux is an open source GPL licensed monolithic kernel from the UNIX tradition. Development started in 1991 by Linus Torvalds. It was originally intended as an educational project to learn more about operating systems and to port Minix, an older educational kernel, and to port it to the 80386 computer he owned at the time\cite{1_love_2010}.
+
+The Windows NT 3.1 kernel was originally released in 1993. Windows is uniquely intertwined with its windowing system and display driver code, and has a novel idea of subsystems. Subsystems can provide different APIs such as MS-DOS, Windows 16, Windows 32, or even a POSIX compliant subsystem\cite{2_russinovich_solomon_ionescu_2012}.
+
+The FreeBSD operating System is a fork of the original BSD operating system. The early 4.3 BSD operating system was produced in 1983\cite{3_mckusick_neville-neil_watson_2015}.
+
+The Kernel of Truth is a small hobbyist kernel I am currently developing. It is currently undergoing major changes and is not as well designed as more professional operating systems, and lacks many features. It runs on x86 and has virtual memory, preemptive multitasking, and, on a branch which hasn't yet been merged into master, a handful of syscalls. It has drivers for serial ports, a PS/2 keyboard, a VGA terminal, and a hardware timer. Notable features it lacks include signals, forms of IPC like sockets and pipes, an ATA hard disk driver, and a file system\cite{4_kronquist_2016}.
+
+\section{Processes}
+For modern multi-tasking kernels, the process is the fundamental unit of work.
+Many different programs need to share resources, such as the CPU or different files, and they may need to communicate with each other. Modern operating systems manage process' memory using virtual memory and a virtual CPU.
+
+\subsection{Linux Processes}
+On Linux processes are a special kind of task, which is a generic name for code which can be scheduled and includes both threads and processes. There is a structure called the \texttt{task\_struct} which defines the attributes of a process. The \texttt{task\_struct} is a relatively large data structure containing 211 fields, although not all of these may be compiled depending on how the kernel is configured. For the 2.6 kernel series on x86 the structure would take up 1.7 kilobytes. Because it is so large, the structure is allocated using the slab allocator, a type of kernel heap optimized for cache coloring. The kernel keeps the processes in a circular doubly linked list known as the task list.
+
+Each process has two stacks, a kernel stack and a user stack. These stacks are used when running kernel and userspace C code respectively. It is necessary to separate these two stacks so userspace code cannot modify kernel data living on the kernel stack. If userspace code could modify kernel data it would be trivial to manipulate any return values and function arguments which would be pushed to the stack, effectively granting userspace code the ability to run any function within the kernel.
+
+At the end of the kernel stack the kernel stores a \texttt{thread\_info} structure which contains important thread specific data and a pointer to the \texttt{task\_struct}. Any thread code running in kernel mode can quickly find the current task by looking at the end of the stack and following the pointer to the \texttt{task\_struct}.
+
+Processes are arranged in a tree hierarchy. The first process, called init, will start all of the other processes, so it is the parent of all other processes and is at the root of the tree. If any processes starts another process, the new process is called the child of the first process, and conversely the first process is called its parent. In Linux it is possible to re-parent a process so the task structure will store both the child's current process as well as the original process\cite{5_Torvalds_2016}.
+
+In Linux new processes can only be created by the \texttt{fork}, \texttt{clone}, or \texttt{vfork} syscalls, which are all essentially different ways of accessing the same code. Creating processes is relatively lightweight and efficient compared to other operating systems like Windows. On most unices this syscall creates a copy of the process's page table, address space, and all of its resources. This can be incredibly expensive. To start a new program a process must use the \texttt{fork} syscall followed by the \texttt{exec} syscall. This means that in order to start a new process the entirety of the current process would have to be copied only to be immediately overwritten by the information of the new program being run. To mitigate this expensive copying Linux process use copy on write pages so that a new copy is not made. This has the additional advantage that if a program does not immediately call exec it can use many of the same resources.
+
+Processes can exist in several different states. A process starts as \texttt{TASK\_RUNNING}. It can be paused, for instance by syscalls like \texttt{sleep}. When a process is paused it will transition to either \texttt{TASK\_INTERRUPTABLE} or \texttt{TASK\_UNINTERRUPTABLE}. If a task is interruptable it will be woken if it receives a signal. However, if a task is uninterruptable it will not be worken if it receives a signal. Additionally, process can be marked as being traced by a program like \textit{ptrace}, or as stopped to indicate that it has finished running and is not eligible to be scheduled. Processes are not immediately cleaned up after they stop because their parent may wish to learn about their exit code or other final status. To learn about this  information and clean up the child process a parent process can use the \texttt{wait} syscall \cite{1_love_2010}.
+
+
+\subsection{Windows Processes}
+The Windows processes are far more complicated than those of other operating systems and have several different structures with redundant information. In some sense, compartmentalizing code which deals with per-process graphics and different Windows subsystems is a reasonable engineering decision, but most other operating systems choose far more spartan approach. They do not implement an entire in-kernel windowing system or have different subsystems to provide APIs like POSIX and Win32. For instance, Linux does not provide any compatibility APIs, and leaves graphics to programs like the X Window system or Wayland. However, FreeBSD takes a similar approach to Windows and offers a Linux compatibility system which provides Linux specific syscalls and syscall mechanisms.
+
+Windows processes are defined by executive process of EPROCESS structures. Processes have at least one and possibly many threads which are represented by ETHREAD structures. For backwards compatibility, programs which use the Win32 API maintain parallel CSR\_PROCESS and W32PROCESS structures. Processes also maintain userland accessible Process Environment Blocks, or PEBs. Similar to other operating systems, the EPROCESS structure contains a unique process ID, process flags, a kernel stack. The EPROCESS structure stores the parent process' ID, whereas Linux's \texttt{task\_struct} stores a pointer directly to the parent process. EPROCESS also stores a linked list of threads. The full listing of the EPROCESS structure's fields can be found in Appendix B.
+
+The CSR\_PROCESS structure contains information specific to the Windows subsystem, as opposed to, say, the POSIX subsystem. Copies of each CSR\_PROCESS structure are created for each running Windows session.
+
+The WIN32PROCESS structure stores userspace readable data needed by the loader, heap manager, and other userspace parts of Windows. It stores all of the information the Windows window management subsystems need to know about the process. Linux and FreeBSD do not have built in Windowing systems and have a far simpler structures.
+
+On Windows there are four different ways to create a process: \texttt{CreateProcess}, \texttt{CreateProcessAsUser}, \texttt{CreateProcessWithTokenW}, and \texttt{CreateProcessWithLogonW}. There are seven different steps to creating a Windows process. First the flags to the \texttt{CreateProcess} function are validated and translated to their native subsystem counterpart. Next the executable image is loaded into the process. This is surprisingly complicated wince the image could be a normal Windows executable, an older Win16 executable, an MS-DOS executable, a batch file, or even an MS-DOS executable. Then the EPROCESS structure is initialized. This includes creating a KPROCESS structure which is a doubly linked list of processes, and the PEB. Next the initial thread is initialized. This involves setting up its stack and Thread Environment Block. Next the Windows specific subsystem information is initialized, including the CSR\_PROCESS structure, and the application window and cursor. Next the initial thread is started, if the CREATE\_SUSPENDED flag was not passed, and process debug handlers are set up\cite{2_russinovich_solomon_ionescu_2012}.
+
+\subsection{FreeBSD Processes}
+FreeBSD follows the POSIX tradition. Processes are arranged in a tree. Processes are kept in a doubly linked list and each process has a unique PID. Like Linux and Windows the \texttt{proc} structure keeps track of the virtual memory space, process group, pending signals and open file descriptors. The \texttt{proc} structure is significantly shorter than Linux's \texttt{task\_struct}. Unlike Linux, there is a clear delineation between processes and threads and like Windows a process may have many threads. Threads are kept as a linked list in the \texttt{proc} structure. On freebsd processes can be created using the \texttt{fork}, \texttt{vfork}, and \texttt{rfork} system calls. The \texttt{rfork} syscall is analogous to Linux's \texttt{clone} system call in that it allows child processes to share additional resources with their parent. Processes have three states, NEW, NORMAL, and ZOMBIE. ZOMBIE processes have not yet been cleaned up by their parent. NORMAL threads can be RUNNABLE, SLEEPING, or STOPPED. Running threads are placed on the run queue while sleeping threads are placed on the sleep queue. Threads which are waiting on events are placed on the turnstile queue\cite{3_mckusick_neville-neil_watson_2015}.
+\subsection{Kernel of Truth Processes}
+By comparison to more professional operating systems, the Kernel of Truth's processes are incredibly basic. Unlike other operating systems, processes are not arranged in any sort of tree. Like Linux, process metadata is allocated on the kernel heap. Processes are arranged in a circular singly linked list. A pointer to the current process is stored as a global variable called \texttt{running\_proc}. Each process has a unique process id, as well as a user stack and a kernel stack. The process structure also has a pointer to the page directory of the currently running process, as well as a pointer to the next process. Finally, the process structure has a field indicating the status of the process, including  whether it is has already been started.
+
+\lstset{language=C,caption={Kernel of Truth Process Structure},label=process}
+\begin{lstlisting}
+struct process {
+    uint32_t id;
+    uint32_t user_esp;
+    uint32_t kernel_esp;
+    uint32_t cr3;
+    struct process *next;
+    uint32_t status;
+};
+\end{lstlisting}
+
+\section{Threads}
+Threads allow programmers to run several copies of the same code in the same address space. They are designed to be considerably lighter weight than processes which require significant overhead to start and control resources.
+
+\subsection{FreeBSD Threads}
+FreeBSD threads are distinct from processes, unlike Linux threads. Each thread has a kernel stack as well as a structure for keeping track of the thread's current state when it is interrupted. On the x86 architecture the kernel stack is restricted to two pages worth of memory. Threads have five states, \texttt{TDS\_INTERACTIVE}, \texttt{TDS\_INHIBITED}, \texttt{TDS\_CAN\_RUN}, \texttt{TDS\_RUNQ}, and \texttt{TDS\_RUNNING}\cite{3_mckusick_neville-neil_watson_2015}.
+
+\subsection{Windows Threads}
+On Windows, all processes have at least one thread. Threads can run both in userspace and in kernel space. Similar to processes, each thread has an executive thread object, or ETHREAD structure. The ETHREAD structure keeps track of the total amount of time spent running kernel code and user code, as well as other thread scheduling information. It also keeps the process ID as well as a pointer to the EPROCESS struct itself, which happens to have the process ID. It keeps track of the kernel stack and any pending I/O requests for the thread, among many other things which can be found in Appendix C. Windows also keeps a KTHREAD structure which has additional thread scheduling information, and a Thread Environment Block which, similarly to the PEB, contains userspace readable thread information. Again mirroring the process, threads have a CSR\_THREAD structure for windows subsystem internal bookkeeping.
+
+\subsection{Linux Threads}
+Linux takes an unconventional approach and implements threads as processes which share the same address space. Each thread has its own \texttt{task\_struct} and is scheduled just like any process.
+
+\subsection{Kernel of Truth Threads}
+The Kernel of Truth presently does not have any threading capabilities. I plan to follow Linux's suit and make threads essentially lightweight processes which share the same resources at a later date. For now, however, I am focusing on implementing the fundamentals of a system.
+
+\section{Scheduling}
+\subsection{The Linux Scheduler}
+Linux has several possible priority based scheduling algorithms which can be used based on the process' scheduling policy. The two most important types of policies are the soft real-time scheduling policy and the normal policy. For processes which use the normal policy, each process has a ``nice'' value between -20 and 19. Normal users cannot increase the priority of their tasks above the default value of 0. Most operating systems assign timeslices, or periods of time, to each process based off of their ``niceness'' value. The nicer the process, the longer a timeslice it will receive. Linux's Completely Fair Scheduler, by contrast, actually assigns processes a fair fraction of the total CPU usage weighted by ``niceness'' value. Each process runs for an amount of time determined by the process' nice value over the sum of the nice values of all running processes. This is known as the virtual runtime, or \texttt{vruntime}. However, as the number of processes increases this value will tend towards 0. To prevent it from becoming too small for the program to do any work there is a floor value so each process will receive a reasonable minimum amount of time on the CPU. The kernel chooses to run the process with the smallest \texttt{vruntime}, in other words the process which has been most starved of CPU time. To determine which process has the smallest \texttt{vruntime} Linux stores all of the processes in a red-black tree, a self balancing binary search tree.
+
+Linux has two types of soft real-time scheduling policies called \texttt{SCHED\_FIFO} and \texttt{SCHED\_RR}. Soft real-time behavior means that the kernel will try its best to run tasks before their timing deadlines, but cannot completely guarantee that they will be run. If a process' timing deadline passes it will not be run. Processes which use these policies are controlled by the real-time scheduler instead of the Completely Fair Scheduler. Tasks which are set the \texttt{SCHED\_FIFO} policy run in the order they are declared, First In First Out. They are given higher priority than all of the normal tasks and will run without interruption until they finish or yield their time to the processor. If a FIFO task yields its time to the processor the next FIFO task will start, and if there are no more FIFO tasks normal tasks can start running. Unlike \texttt{SCHED\_FIFO}, The \texttt{SCHED\_RR} policy stands for Round Robin, and unlike the other policies Round Robin tasks are scheduled according to their timeslices. Each task runs for a set amount of time and then it yields to the next FIFO or Round Robin policy task\cite{1_love_2010}.
+
+
+\subsection{The FreeBSD Scheduler}
+FreeBSD has several schedulers, the most well known and well designed of which is known as the ULE scheduler. The ULE scheduler is a Round Robin scheduler which uses timeslices. It adjusts the length of process timeslices based on the system load, similar to Linux. Threads are scheduled by their class and priority. Threads have a priority between 0 and 255. This range is broken up into several different classes. Threads with a priority between 0 and 47 are interrupt threads and have the highest priority. Priorities in the range 48-79 are for real-time user threads. The next step down are kernel threads which are not servicing interrupts, and these have the range 80-119. Next comes the timeshare class for normal user threads which have the range 120-223. Finally there are idle threads which come with the priorities 224-255.
+Like Linux the FreeBSD scheduler uses a mathematical formula for determining which process to run next, but it doesn't aim for theoretical fairness. Instead it calculates an interactivity score:
+
+$interactivity score = \frac{scaling factor}{\frac{time spent sleeping}{time spent running}}$
+
+When a thread's run time is greater than the amount of time it has spent sleeping this equation is modified:
+
+$interactivity score = \frac{scaling factor}{\frac{time spent sleeping}{time spent running}} + scaling factor$
+\cite{3_mckusick_neville-neil_watson_2015}.
+
+
+\subsection{The Windows Scheduler}
+Like Linux, Windows has a preemptive scheduling algorithm which schedules threads according to their priority. Similar to other operating systems threads have an affinity for which processor they run on. Hoe Windows does not have a dedicated scheduler. According to \textit{Windows' System Internals} \textit{``There's no single `scheduler' module or routine, however—the code is spread throughout the kernel in which scheduling-related events occur''}.
+
+Windows uses 32 priority levels, similar to Linux's 40 nice values. Levels 31-16 are real time levels for processes which have soft real-time requirements. Levels 1-15 are for the normal or ``variable'' levels. Level 0 is reserved for the zero page thread, which zeros process pages before they're reused so sensitive information doesn't leak between processes. The default process priority level is 24. Unlike Linux, on single core systems as soon as a higher priority thread becomes available to run, the current thread is interrupted. On multi-processor systems the algorithms for choosing which threads to run next are significantly more complicated to maintain processor affinity.
+
+Threads running in userspace can't block any interrupts and are said to be in IRQ leve 0. However, threads running in kernel mode can run at a higher interrupt level called IRQL 1 or APC level cannot be interrupted by scheduling related software interrupts. Compared to Linux's Completely Fair Scheduler, the way the Windows scheduler divides up CPU time is incredibly simplistic. On desktop Windows machines threads run for two clock intervals and on server machines they run for 12 intervals. The length of the clock cycle can of course be adjusted.
+
+Thread timeslices, or quantums, are actually accounted for in units of one third a clock cycle. This is because it would be possible for a thread's quantum to never be decreased if it ran, slept, and then ran again repeatedly in such a pattern that it was always sleeping during the clock interrupt.
+The scheduler also has a boosting system to automatically increase a thread's priority and decrease its latency. Boosts be caused by scheduler events, I/O completion, UI input, locks becoming available, or resource starvation. This boosting system still wasn't sufficient to provide low latency scheduling for applications like audio or 3D games, which need to be responsive to the user, but can't monoplize the CPU like real-time tasks. Desktop versions of Windows have a service called MMCSS to provide smooth playback for multimedia applications like audio, screen capture, window management, and games. Applications which register with MMCSS can be put into an additional 26 different categories. To ensure that high-priority interrupts like network traffic don't negatively impact the experience of MMCSS registered applications, the MMCSS sends a message to the network stack to throttle network operations\cite{2_russinovich_solomon_ionescu_2012}.
+
+\subsection{The Kernel of Truth Scheduler}
+The Kernel of Truth uses the most brain dead scheduler implementation possible. Processes are kept in a circular singularly linked list and the current process is stored in a pointer called \texttt{running\_proc}. Every time the timer interrupt fires the \texttt{process\_handler} function is called. This function tells the programmable interrupt controller that the interrupt has been serviced and then calls the \texttt{preempt} function. \texttt{preempt} advances the \texttt{running\_proc} pointer to the next process in the linked list. Next it sets the kernel stack in the TSS segment, which is an annoying hoop to jump through for x86 hardware multitasking. Finally it calls the \texttt{switch\_task} assembly routine which saves all of the current registers to the last process' kernel stack and switches to the current process' kernel stack. From that stack it restores the current process' page table and registers and returns to userspace or whatever code was running last. Like Linux the Kernel of Truth is fully preemptable, which means that kernel code can be safely interrupted. However, there are several known bugs in the physical memory allocator which could lead to race conditions which I intend to fix when I have time\cite{4_kronquist_2016}.
+
+\lstset{language=C,caption={Kernel of Truth Scheduler},label=process}
+\begin{lstlisting}
+void preempt() {
+    klog("preempt\n");
+    struct process *last = running_proc;
+    running_proc = running_proc->next;
+    // switch_task does not behave properly when the last task and current
+    // tasks are the same, especially if the state of the current task's
+    // registers are not properly initialized.
+    // If the next proc is the same as the current one then return.
+    if (running_proc == last) {
+        return;
+    }
+    klogf("\nSetting stack to %p\n", running_proc->kernel_esp);
+    switch_task(running_proc->kernel_esp, running_proc->cr3, &last->kernel_esp);
+}
+
+void process_handler() {
+    // End interrupt
+    write_port(0x20, 0x20);
+    preempt();
+}
+\end{lstlisting}
+
+
+\clearpage
+\printbibliography
+
+\clearpage
+
+\begin{appendices}
+
+\section{Windows Process Structures}
+
+\begin{tabular}{|l|}
+\textbf{EPROCESS Structure Fields}\\
+\hline
+Process control block (PCB) \\
+Process ID \\
+Parent process ID \\
+Exit status \\
+Create and exit times \\
+Process environment block \\
+Active process link \\
+Session process link \\
+Quota block \\
+Memory management information \\
+Security/Exception/Debug ports \\
+Primary access token \\
+Handle table \\
+Image filename \\
+Image base address \\
+Win32k process structure \\
+Job object \\
+Process flags \\
+Process counters \\
+Dispatcher header \\
+Process page directory \\
+Kernel time \\
+User time \\
+Cycle time \\
+Inswap/Outswap list entry \\
+Thread list head \\
+Process spinlock \\
+Processor affinity \\
+Resident kernel stack count \\
+Ideal node \\
+Process state \\
+Thread seed \\
+Inheritable Thread Scheduling Flags \\
+\end{tabular}
+
+\begin{tabular}{|l|}
+\textbf{Process Environment Block Structure Fields}\\
+\hline
+Image base address \\
+Loader database \\
+Thread-local storage data \\
+Code page data \\
+Process flags \\
+Heap flags \\
+Heap size information \\
+Process heap \\
+GDI shared handle table \\
+OS version information \\
+Image version information \\
+Image process affinity mask \\
+Application compatibility data \\
+FLS/TLS data \\
+\end{tabular}
+
+
+\begin{tabular}{|l|}
+\textbf{CSR\_PROCESS Structure Fields}\\
+\hline
+Reference count \\
+Client ID \\
+Session Data \\
+Process links \\
+Thread list \\
+Parent \\
+Client LPC port \\
+Client View data \\
+Sequence number \\
+Flags \\
+Thread count \\
+Shutdown level \\
+Server data \\
+\end{tabular}
+
+\begin{tabular}{|l|}
+\textbf{WIN32PROCESS Structure Fields}\\
+\hline
+EPROCESS pointer\\
+Ref count \\
+Flags \\
+PID \\
+Counts \\
+Handle table GDI lists \\
+DirectX process \\
+Next process \\
+\end{tabular}
+
+\end{appendices}
+\end{document}
+\bibliography{bib.bib}
+\bibliographystyle{IEEEtran}
