@@ -47,7 +47,7 @@ showps: $(PSF)
 
 
 clean:
-	rm -f *.pdf *.ps *.dvi *.out *.log *.aux *.bbl *.blg *.pyg
+	rm -f *.pdf *.ps *.dvi *.out *.log *.aux *.bbl *.blg *.pyg *-blx.bib *.run.xml
 
 
 .PHONY: all show clean ps pdf showps debug test
