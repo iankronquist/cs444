@@ -85,7 +85,7 @@ The purpose of this assignment was to teach us to read and understand complicate
 \section{Personal Approach}
 I started by reading the chapter on I/O schedulers so I could familiarize myself with how Linux's pluggable architecture works. Then I read several different example schedulers including the \texttt{noop} and \texttt{deadline} schedulers, as well as parts of the Linus elevator. I also read about Linux's linked lists, rb-trees, bio blocks, and request structures so I could understand the data structures I would use.
 
-I started by copying the \texttt{noop} scheduler and renaming it. I then edited several \texttt{Kconfig} files to activate my new scheduler. I then had to consult the QEMU manual pages again to figure out how to disable virtio. I changed the command to use an \texttt{ide} controller  and the texttt{hda} hard disk. I also changed the networking option to forward port 7222 on the os-clas server to port 22 so I could copy my test script onto the virtual machine\cite{qemu(1)}.
+I started by copying the \texttt{noop} scheduler and renaming it. I then edited several \texttt{Kconfig} files to activate my new scheduler. I then had to consult the QEMU manual pages again to figure out how to disable virtio. I changed the command to use an \texttt{ide} controller  and the texttt{hda} hard disk. I also changed the networking option to forward port 7222 on the os-clas server to port 22 so I could copy my test script onto the virtual machine. \cite{qemu(1)}
 
 \lstset{language=bash,caption={QEMU Command Invocation},label=aa}
 \begin{lstlisting}
@@ -93,7 +93,7 @@ qemu-system-i386  -nographic -kernel ./linux-yocto-3.14/arch/x86/boot/bzImage -d
 \end{lstlisting}
 
 I then read more about the LOOK and C-LOOK algorithms. I decided to start by implementing the most simple one, the C-LOOK algorithm. This algorithm sweeps from one end of the hard disk to the other, and when it gets to the end it starts over again from the beginning. I implemented this with a simple linked list which was kept in sorted order. When dispatching the request I would iterate through the list until I reached a request which was greater than the current sector number. The flaw with this approach is that it's an $O(n)$ algorithm. It is incredibly inefficient and ther are several nasty edge cases. Nonetheless, this was a full fledged working implementation with front merging. I decided instead to reimplement the entire module using rb-trees.
-\lstset{language=C,caption={Test Script},label=aa}
+\lstset{language=C,caption={Linked List Implementation Dispatch Function},label=aa}
 \begin{lstlisting}
 // Choose the next request to service
 static int look_dispatch(struct request_queue *q, int force)
@@ -138,8 +138,10 @@ static int look_dispatch(struct request_queue *q, int force)
 }
 \end{lstlisting}
 
-Red-Black tree traversal is an $O(log n)$ operation and is significantly faster than linear search in the general case. In this implementation I do not keep a queue at all. Instead, I drew inspiration from the \texttt{deadline} scheduler and keep pending requests in a self balancing tree. The Shortest Seek Time First algorithm dictates that the next request should be the closest one to the current read position. To find the next closest request, traverse the tree searching for sectors as close as possible to the current value. Keep track of the closest request seen so far. When the algorithm reaches the leaf of the tree it returns the closest sector it has seen so far. Since this algorithm always traverses the tree until it reaches a leaf it has a $\Theta(log n)$ runtime. To implement this faster approach I started with the \texttt{elv\_rb\_find} function in \texttt{block/elevator.c} and made significant modifications.
+Red-Black tree traversal is an $O(log(n))$ operation and is significantly faster than linear search in the general case. In this implementation I do not keep a queue at all. Instead, I drew inspiration from the \texttt{deadline} scheduler and keep pending requests in a self balancing tree. The Shortest Seek Time First algorithm dictates that the next request should be the closest one to the current read position. To find the next closest request, traverse the tree searching for sectors as close as possible to the current value. Keep track of the closest request seen so far. When the algorithm reaches the leaf of the tree it returns the closest sector it has seen so far. Since this algorithm always traverses the tree until it reaches a leaf it has a $\Theta(log(n))$ runtime. To implement this faster approach I started with the \texttt{elv\_rb\_find} function in \texttt{block/elevator.c} and made significant modifications.
 
+\clearpage
+\lstset{language=C,caption={RB-Tree Implementation Find Closest Sector Function},label=aa}
 \begin{lstlisting}
 // Walk the rbtree starting at root and find the closest value to sector
 // Returns NULL if the tree is empty
@@ -196,6 +198,7 @@ Another upshot of this algorithm is that it is trivial to transform it into a va
 
 In this implementation I decided to follow an approach for merging very similar to the \texttt{deadline} scheduler. I attempt to find any sectors which come after the current sector and then perform a front merge.
 
+\lstset{language=C,caption={RB-Tree Merging Implementation},label=aa}
 \begin{lstlisting}
 static int look_merge(struct request_queue *q, struct request **req,
 		struct bio *bio)
@@ -216,7 +219,7 @@ static int look_merge(struct request_queue *q, struct request **req,
 \end{lstlisting}
 
 \section{Testing}
-In order to test the correctness of my solution I wrote a simple shell script to exercise the functionality of the I/O scheduler. This script activates my \texttt{look} scheduler, reads 9MB or random data and writes it to the disk, and then copies the data and checks to see if they differ. If they differ it writes that the test failed. I put this script in a bash while loop and left it running for a significant period of time as a stability test, which apparently isn't too far different than how the Kernel developers do it\cite{lkml}.
+In order to test the correctness of my solution I wrote a simple shell script to exercise the functionality of the I/O scheduler. This script activates my \texttt{look} scheduler, reads 9MB or random data and writes it to the disk, and then copies the data and checks to see if they differ. If they differ it writes that the test failed. I put this script in a bash while loop and left it running for a significant period of time as a stability test, which apparently isn't too far different from how the Kernel developers do it. \cite{lkml}
 \lstset{language=bash,caption={Test Script},label=aa}
 \begin{lstlisting}
 #!/bin/bash
@@ -230,7 +233,7 @@ sync
 cp test_data_1 test_data_2
 sync
 diff test_data_1 test_data_2
-if [[ \$? != 0 ]]; then
+if [[ $? != 0 ]]; then
 	echo "Test failed!"
 else
 	echo "Test passed!"
@@ -251,6 +254,7 @@ I learned about the difference between the C-LOOK, LOOK, and SSTF algorithms, as
     18:00 Sunday, April 25 & 5 hours & Implement C-LOOK without merging.\\
     12:00 Sunday, April 25 & 1 hour and a half & Implement front merging.\\
     16:00 Sunday, April 25 & 2 hours & Implement rb-tree version of SSTF while helping friend on Senior Project work.\\
+    21:00 Sunday, April 25 & 1 hours & Write report and prepare to turn project in.\\
 \end{tabular}
 
 \bigskip
