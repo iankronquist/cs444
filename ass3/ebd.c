@@ -22,7 +22,8 @@ static int logical_block_size = 512;
 module_param(logical_block_size, int, 0);
 static int num_sectors = 1024;
 module_param(num_sectors, int, 0);
-
+static u8 key[32] = "0123456789abcdef0123456789abcdef";
+module_param(key, char*, 0400);
 // Create global queue for servicing requests.
 static struct request_queue *Queue;
 
@@ -113,7 +114,6 @@ static struct block_device_operations ebd_ops = {
 static int __init ebd_init(void) {
     unsigned int err;
     // FIXME: Generate random key.
-    u8 *test_key = "0123456789abcdef0123456789abcdef";
 
     // Initialize the device spin lock. Only one process should be able to
     // read/write to the device at time.
@@ -137,7 +137,7 @@ static int __init ebd_init(void) {
     //sg_init_table(Device.sg, );
 
     // Set the key
-    err = crypto_cipher_setkey(Device.blkcipher, test_key, KEY_SIZE);
+    err = crypto_cipher_setkey(Device.blkcipher, key, KEY_SIZE);
     if (err != 0) {
         printk("Failed to set key");
         goto free_mem;
