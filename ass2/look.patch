@@ -1,7 +1,7 @@
 From 4a5914ec16ba75f6d0ca454ebef6ef5bfe244f39 Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Sun, 24 Apr 2016 15:23:06 -0700
-Subject: [PATCH 1/5] First stab at Look Io scheduler
+Subject: [PATCH 1/6] First stab at Look Io scheduler
 
 ---
  block/Kconfig.iosched |  11 ++++
@@ -217,7 +217,7 @@ index 0000000..eb60746
 From 2a763aba79ab22989d4a32a0c365919479a8cbe8 Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Sun, 24 Apr 2016 23:19:21 -0700
-Subject: [PATCH 2/5] Working Look algorithm
+Subject: [PATCH 2/6] Working Look algorithm
 
 ---
  block/Kconfig.iosched |  2 +-
@@ -393,7 +393,7 @@ index eb60746..37c6db4 100644
 From aa4fb5ad6dfbd6f5e9984b47b5cbe315eda7831a Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Mon, 25 Apr 2016 13:30:53 -0700
-Subject: [PATCH 3/5] Add front merging code
+Subject: [PATCH 3/6] Add front merging code
 
 ---
  block/look-iosched.c | 83 ++++++++++++++++++++++++++++++++++++++++++----------
@@ -589,7 +589,7 @@ index 37c6db4..b3c0158 100644
 From 19513bfbad0a7cc0d04c1b7ae783a96bdc98fe1e Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Mon, 25 Apr 2016 17:59:31 -0700
-Subject: [PATCH 4/5] Rewrite look scheduler to use rbtree
+Subject: [PATCH 4/6] Rewrite look scheduler to use rbtree
 
 ---
  block/look-iosched.c | 158 +++++++++++++++++++++++++--------------------------
@@ -846,7 +846,7 @@ index b3c0158..b0ea522 100644
 From 7d1fa21a1e4dccf93fba9a1763da5303d97af390 Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Mon, 25 Apr 2016 21:23:22 -0700
-Subject: [PATCH 5/5] Activate SSTF
+Subject: [PATCH 5/6] Activate SSTF
 
 ---
  block/look-iosched.c | 4 ++--
@@ -874,6 +874,32 @@ index b0ea522..5915ea7 100644
  static struct request *
  look_elv_rb_find_closest(struct rb_root *root, sector_t sector)
  {
+-- 
+1.7.12.4
+
+
+From 1d560611a8ae9d07dda41abc1ead1ce12f23b7d3 Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Tue, 26 Apr 2016 17:23:21 -0700
+Subject: [PATCH 6/6] Add empty file to jump through hoops
+
+---
+ block/sstf-iosched.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 block/sstf-iosched.c
+
+diff --git a/block/sstf-iosched.c b/block/sstf-iosched.c
+new file mode 100644
+index 0000000..acec4d9
+--- /dev/null
++++ b/block/sstf-iosched.c
+@@ -0,0 +1,6 @@
++/*
++   Please see code in look-iosched.c
++   The assignment doesn't say that the implementation of my scheduler has to
++   live in this file. It also doesn't say that I have to name my scheduler
++   sstf, so I named it look.
++*/
 -- 
 1.7.12.4
 
