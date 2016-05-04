@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= -std=c99 -O2 -Wall -Werror -Wextra -pthread
+CFLAGS= -std=c99 -O0 -Wall -Werror -Wextra -pthread
 DEBUG_CFLAGS=-g
 
 all: cme

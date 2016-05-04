@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -9,7 +10,7 @@
 #include "random.h"
 
 #define MAX 10
-#define SLEEP_PERIOD 0
+#define SLEEP_PERIOD 1
 #define A_WHILE 60
 #define NUM_SEARCHERS 3
 #define NUM_INSERTERS 2
@@ -106,6 +107,7 @@ void *deleter(void *idhack) {
         struct node *prev = List.head;
         struct node *straw = List.head;
         pthread_mutex_lock(&List.delete);
+        pthread_mutex_lock(&List.insert);
         for (int i = 0; i < SEM_MAX; ++i) {
             sem_wait(&List.s);
         }
@@ -135,6 +137,7 @@ around:
         for (int i = 0; i < SEM_MAX; ++i) {
             sem_post(&List.s);
         }
+        pthread_mutex_unlock(&List.insert);
         pthread_mutex_unlock(&List.delete);
         sleep(SLEEP_PERIOD);
     }
@@ -158,10 +161,12 @@ void *searcher(void *idhack) {
 int main() {
     random_number_init();
     list_init(&List);
-    pthread_t searchers[NUM_SEARCHERS], deleters[NUM_DELETERS],
-              inserters[NUM_INSERTERS];
+    pthread_t searchers[NUM_SEARCHERS];
+    pthread_t deleters[NUM_DELETERS];
+    pthread_t inserters[NUM_INSERTERS];
     // Start workers
     for (unsigned long i = 0; i < NUM_INSERTERS; ++i) {
+        printf("%lu\n", i);
         pthread_create(&inserters[i], NULL, inserter, (void*)i);
     }
     for (unsigned long i = 0; i < NUM_SEARCHERS; ++i) {
