@@ -4,7 +4,7 @@ DEBUG_CFLAGS=-g
 
 all: cme
 
-debug: CFLAGS += DEBUG_CFLAGS
+debug: CFLAGS += $(DEBUG_CFLAGS)
 debug: all
 
 cme: cme.c random.o randr.o

@@ -4,22 +4,26 @@
 #include <unistd.h>
 
 #include <pthread.h>
+#include <semaphore.h>
 
 #include "random.h"
 
-#define MAX 100
-#define SLEEP_PERIOD 1
+#define MAX 10
+#define SLEEP_PERIOD 0
 #define A_WHILE 60
 #define NUM_SEARCHERS 3
 #define NUM_INSERTERS 2
 #define NUM_DELETERS 2
+#define SEM_MAX (NUM_SEARCHERS+NUM_INSERTERS)
 
 struct node {
     int value;
+    sem_t s;
     struct node *next;
 };
 
 struct llist {
+    sem_t s;
     pthread_mutex_t insert, delete;
     struct node *head, *tail;
 } List;
@@ -31,6 +35,10 @@ void list_init(struct llist *list) {
     list->tail = NULL;
     list->insert = blank;
     list->delete = blank;
+    if(sem_init(&list->s, 0, SEM_MAX) == -1) {
+        perror("Initing semaphore");
+        exit(EXIT_FAILURE);
+    }
 }
 
 struct node *make_node(int value, struct node *next) {
@@ -43,10 +51,11 @@ struct node *make_node(int value, struct node *next) {
     return new;
 }
 
-void insert_head(struct llist *l, int item) {
+void insert_tail(struct llist *l, int item) {
     struct node *new;
+    sem_wait(&l->s);
 restart:
-    new = make_node(item, l->head);
+    new = make_node(item, NULL);
     if (new == NULL) {
         printf("Cannot allocate memory."
                " Not performing any insertions for a while");
@@ -54,47 +63,37 @@ restart:
         goto restart;
     }
     pthread_mutex_lock(&l->insert);
-    l->head = new;
+    if (l->tail != NULL) {
+        l->tail->next = new;
+    }
+    if (l->head == NULL) {
+        l->head = new;
+    }
+    l->tail = new;
     pthread_mutex_unlock(&l->insert);
+    sem_post(&l->s);
 }
 
 bool search(struct llist *l, int needle) {
+    sem_wait(&l->s);
     struct node *straw = l->head;
     while (straw) {
         if (straw->value == needle) {
+            sem_post(&l->s);
             return true;
         }
         straw = straw->next;
     }
+    sem_post(&l->s);
     return false;
-}
-
-void remove_tail(struct llist *l) {
-    pthread_mutex_lock(&l->delete);
-    if (l->tail != NULL) {
-        if (l->tail == l->head) {
-            pthread_mutex_lock(&l->insert);
-            struct node *old = l->tail;
-            l->tail = old->next;
-            free(old);
-            l->head = NULL;
-            l->tail = NULL;
-            pthread_mutex_unlock(&l->insert);
-        } else {
-            struct node *old = l->tail;
-            l->tail = old->next;
-            free(old);
-        }
-    }
-    pthread_mutex_unlock(&l->delete);
 }
 
 void *inserter(void *idhack) {
     uintptr_t id = (uintptr_t)idhack;
     while (true) {
         int value = get_random_number() % MAX;
-        insert_head(&List, value);
-        printf("[%lu]: Inserted the value %d at the head.\n", id, value);
+        insert_tail(&List, value);
+        printf("[%lu]: Inserted the value %d at the tail.\n", id, value);
         sleep(SLEEP_PERIOD);
     }
     return NULL;
@@ -103,8 +102,40 @@ void *inserter(void *idhack) {
 void *deleter(void *idhack) {
     uintptr_t id = (uintptr_t)idhack;
     while (true) {
-        remove_tail(&List);
-        printf("[%lu]: Removed the value from the tail.\n", id);
+        int needle = get_random_number() % MAX;
+        struct node *prev = List.head;
+        struct node *straw = List.head;
+        pthread_mutex_lock(&List.delete);
+        for (int i = 0; i < SEM_MAX; ++i) {
+            sem_wait(&List.s);
+        }
+        if (straw != NULL && straw->value == needle) {
+            if (straw->next == NULL) {
+                List.tail = NULL;
+            }
+            List.head = straw->next;
+            free(straw);
+            printf("[%lu]: Removed the value %d from head of list.\n", id,
+                   needle);
+            goto around;
+        }
+        while (straw) {
+            if (straw->value == needle) {
+                prev->next = straw->next;
+                if (straw == List.tail) {
+                    List.tail = prev;
+                }
+                free(straw);
+                printf("[%lu]: Removed the value %d.\n", id, needle);
+                break;
+            }
+            straw = straw->next;
+        }
+around:
+        for (int i = 0; i < SEM_MAX; ++i) {
+            sem_post(&List.s);
+        }
+        pthread_mutex_unlock(&List.delete);
         sleep(SLEEP_PERIOD);
     }
     return NULL;
