@@ -15,7 +15,7 @@
 */
 
 
-// Define runtime configurable module parameters.
+// Define loadtime configurable module parameters.
 static int major_num = 0;
 module_param(major_num, int, 0);
 static int logical_block_size = 512;
