@@ -1,0 +1,286 @@
+\documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{color}
+\usepackage{anysize}
+\usepackage{hyperref}
+\usepackage[backend=bibtex]{biblatex}
+\usepackage{amsmath}
+\marginsize{2cm}{2cm}{2cm}{2cm}
+\addbibresource{bib.bib}
+
+\lstdefinelanguage
+   [x86Extended]{Assembler}     % add an "x86Extended dialect of Assembler
+   [x86masm]{Assembler}         % based on the "x86masm" dialect
+   % Define new keywords
+   {morekeywords={rdrand, cpuid}}
+
+\lstdefinestyle{customc}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{OliveGreen},
+  commentstyle=\itshape\color{Fuchsia},
+  identifierstyle=\color{black},
+  stringstyle=\color{Bittersweet},
+}
+
+\lstdefinestyle{customasm}{
+  belowcaptionskip=1\baselineskip,
+  frame=L,
+  xleftmargin=\parindent,
+  language=[x86masm]Assembler,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{Fuchsia},
+}
+
+\lstset{escapechar=@,style=customc}
+
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Oregon State University \par}
+    \vspace{1cm}
+    {\scshape\Large Operating System Feature Comparison \par}
+    \vspace{1.5cm}
+    {\huge\bfseries Interrupts \par}
+    \vspace{2cm}
+    {\Large\itshape Ian Kronquist \par}
+    \vfill
+    \par
+    Professor~Kevin \textsc{McGrath}
+
+    \vfill
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
+
+
+\author{\IEEEauthorblockN{Ian Kronquist}
+\IEEEauthorblockA{School of Electrical and\\Computer Science\\
+Oregon State University\\
+Corvallis, Oregon\\
+kronquii@oregonstate.edu}}
+
+\bigskip
+
+\section{Introduction}
+For this assignment we will examine Interrupts in four different kernels: Linux, Windows NT, FreeBSD, and the Kernel of Truth.
+Linux is an open source GPL licensed monolithic kernel from the UNIX tradition. Development started in 1991 by Linus Torvalds. It was originally intended as an educational project to learn more about operating systems and to port Minix, an older educational kernel, and to port it to the 80386 computer he owned at the time\cite{1_love_2010}.
+
+The Windows NT 3.1 kernel was originally released in 1993. Windows is uniquely intertwined with its windowing system and display driver code, and has a novel idea of subsystems. Subsystems can provide different APIs such as MS-DOS, Windows 16, Windows 32, or even a POSIX compliant subsystem\cite{2_russinovich_solomon_ionescu_2012}.
+
+The FreeBSD operating System is a fork of the original BSD operating system. The early 4.3 BSD operating system was produced in 1983\cite{3_mckusick_neville-neil_watson_2015}.
+
+The Kernel of Truth is a small hobbyist kernel I am currently developing. It is currently undergoing major changes and is not as well designed as more professional operating systems, and lacks many features. It runs on x86 and has virtual memory, preemptive multitasking, and, on a branch which hasn't yet been merged into master, a handful of syscalls. It has drivers for serial ports, a PS/2 keyboard, a VGA terminal, and a hardware timer. Notable features it lacks include signals, forms of IPC like sockets and pipes, an ATA hard disk driver, and a file system\cite{4_kronquist_2016}.
+
+\section{Interrupts}
+x86 differentiates between different kinds of interrupts, called Exceptions and Traps. Traps are purposefully triggered by software. Exceptions are triggered by unexpected behavior from the CPU. This can take the form of accessing invalid memory, or attempting to execute a privileged instruction. Interrupts have different levels, and in general, high priority interrupts can interrupt lower priority interrupts. To prevent this, the CPU interrupt flag can be disabled with the \texttt{cli} instruction, but even if this flag is disabled, certain interrupts such as the Page Fault, the General Protection Fault, the Double Fault, and the Triple Fault can still be triggered. The Double Fault can be triggered if an interrupt occurs during a fault handler. If an error occurs during a Double Fault, a Triple Fault occurs which halts the CPU.
+
+Any preemptive multitasking system must use timer interrupts to preempt running tasks and schedule other tasks to receive CPU time.
+
+\subsection{Linux Interrupts}
+Linux Interrupts handlers are splint into two parts called ``Top Halves'' and ``Bottom Halves''. Top half interrupts take care of critical work such as preserving important data as quickly as possible before deferring additional less time critical work for later. This will run in the interrupt's bottom half. Drivers can register an interrupt with the function \texttt{request\_irq} which dispatches the function \texttt{request\_threaded\_irq}. Unlike The Kernel of Truth, Linux Drivers can share the same interrupt line.
+
+
+\lstset{language=C,caption={Kernel of Truth Process Structure},label=process}
+\begin{lstlisting}
+int request_threaded_irq(unsigned int irq, irq_handler_t handler,
+			 irq_handler_t thread_fn, unsigned long irqflags,
+			 const char *devname, void *dev_id)
+{
+	struct irqaction *action;
+	struct irq_desc *desc;
+	int retval;
+
+	/*
+	 * Sanity-check: shared interrupts must pass in a real dev-ID,
+	 * otherwise we'll have trouble later trying to figure out
+	 * which interrupt is which (messes up the interrupt freeing
+	 * logic etc).
+	 */
+	if ((irqflags & IRQF_SHARED) && !dev_id)
+		return -EINVAL;
+
+	desc = irq_to_desc(irq);
+	if (!desc)
+		return -EINVAL;
+
+	if (!irq_settings_can_request(desc) ||
+	    WARN_ON(irq_settings_is_per_cpu_devid(desc)))
+		return -EINVAL;
+
+	if (!handler) {
+		if (!thread_fn)
+			return -EINVAL;
+		handler = irq_default_primary_handler;
+	}
+
+	action = kzalloc(sizeof(struct irqaction), GFP_KERNEL);
+	if (!action)
+		return -ENOMEM;
+
+	action->handler = handler;
+	action->thread_fn = thread_fn;
+	action->flags = irqflags;
+	action->name = devname;
+	action->dev_id = dev_id;
+
+	chip_bus_lock(desc);
+	retval = __setup_irq(irq, desc, action);
+	chip_bus_sync_unlock(desc);
+
+	if (retval)
+		kfree(action);
+
+#ifdef CONFIG_DEBUG_SHIRQ_FIXME
+	if (!retval && (irqflags & IRQF_SHARED)) {
+		/*
+		 * It's a shared IRQ -- the driver ought to be prepared for it
+		 * to happen immediately, so let's make sure....
+		 * We disable the irq to make sure that a 'real' IRQ doesn't
+		 * run in parallel with our fake.
+		 */
+		unsigned long flags;
+
+		disable_irq(irq);
+		local_irq_save(flags);
+
+		handler(irq, dev_id);
+
+		local_irq_restore(flags);
+		enable_irq(irq);
+	}
+#endif
+	return retval;
+}
+EXPORT_SYMBOL(request_threaded_irq);
+\end{lstlisting}\cite{5_torvalds_2016}
+
+When a driver exits it has to clean up its resources including any interrupts it registered using the function \texttt{free\_irq}.
+
+Once the kernel has time to service less critical work, it can start to work on interrupts' bottom halves. The Kernel went through several different systems trying to perfect the system for deferred work. One system for deferring work is called work queues. Tasks in work queues are run in dedicated kernel threads and incur all of the scheduling and virtual memory allocation overhead of a dedicated thread. As a result high performance softirqs were developed. Multiple softirqs can run at the same time, so softirq programming can be a delicate task as it can easily lead to data corruption and race conditions. As a result, a third. To balance the delicateness of softirqs, tasklets were developed. Multiple tasklets can run at the same time, but no two tasklets of the same type can be triggered, offering basic guarantees of safety\cite{1_love_2010}.
+
+\subsection{FreeBSD Interrupts}
+In FreeBSD parlance, traps are software dispatched interrupts. Like Linux and Windows, FreeBSD distinguishes between traps and interrupts. Traps may occur when a process tries to access memory it doesn't have permissions for, or when it divides by zero. When this happens, a signal is delivered to the process. If the process registered a signal handler it can continue to execute. However, some traps cannot be handled and the process will be immediately terminated. This system is very similar to Linux\cite{3_mckusick_neville-neil_watson_2015}.
+
+In order for a driver to register an interrupt, drivers define any interrupt handlers as part of their \texttt{driver\_t} or \texttt{struct driver} structure\cite{freebsd_2016}.
+
+\lstset{language=C,caption={FreeBSD Driver Structure},label=process}
+\begin{lstlisting}
+struct device {
+	TAILQ_HEAD(device_list, device) dev_children;
+	TAILQ_ENTRY(device) dev_link;
+
+	struct device *dev_parent;
+	const struct module_data *dev_module;
+	void   *dev_sc;
+	void   *dev_aux;
+	driver_filter_t *dev_irq_filter;
+	driver_intr_t *dev_irq_fn;
+	void   *dev_irq_arg;
+
+	uint16_t dev_unit;
+
+	char	dev_nameunit[64];
+	char	dev_desc[64];
+
+	uint8_t	dev_res_alloc:1;
+	uint8_t	dev_quiet:1;
+	uint8_t	dev_softc_set:1;
+	uint8_t	dev_softc_alloc:1;
+	uint8_t	dev_attached:1;
+	uint8_t	dev_fixed_class:1;
+	uint8_t	dev_unit_manual:1;
+};
+\end{lstlisting}
+
+\subsection{Kernel of Truth Interrupts}
+The kernel of Truth sets up interrupts using the Intel Interrupt Descriptor Table or IDT. Each IDT entry contains metadata about whether the interrupt can be triggered from userland and what function to trigger when an interrupt fires. Each function has an assembly routine wrapper which saves the state of the processor to the current kernel stack and then calls another function to do the actual work required by the interrupt. The Kernel of Truth interrupts currently do not have a ``Bottom Half'' or any method of deferring work. I would be willing to write one in lieu of doing the final project. The IDT table is managed by the kernel and is loaded using the \texttt{lidt} assembly instruction.
+
+In order to set up interrupts, the Programmable Interrupt Controller or Advanced Programmable Interrupt Controller needs to be configured by writing to special ports on the CPU.
+
+In general, userland should not be able to trigger arbitrary interrupts, however, the only way to switch to kernel mode is via an interrupt. For this reason the kernel of truth allows userland processes to trigger a syscall using the 0x80 interrupt\cite{4_kronquist_2016}.
+
+\lstset{language=C,caption={Kernel of Truth Process Structure},label=process}
+\begin{lstlisting}
+void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags)
+{
+    idt[num].base_lo = base & 0xffff;
+    idt[num].base_hi = (base >> 16) & 0xffff;
+    idt[num].always0 = 0;
+    idt[num].sel = sel;
+    idt[num].flags = flags;
+}
+
+void idt_install()
+{
+    // 256 is the number of entries in the table.
+    idtp.limit = (sizeof(struct idt_entry) * 256) - 1;
+    idtp.base = (uint32_t) & idt;
+
+    memset(&idt, 0, sizeof(struct idt_entry) * 256);
+
+    idt_set_gate(0, (uint32_t)isr0, 0x08, 0x8e);
+    // etc...
+    idt_set_gate(33, (uint32_t)keyboard_handler, 0x08, 0x8e);
+
+    // There are 4 Interrupt Command Word Registers
+    // ICW1 - begin initialization
+    write_port(PIC_MASTER_CONTROL, 0x11);
+    write_port(PIC_SLAVE_CONTROL, 0x11);
+
+    // Remap interrupts beyond 0x20 because the first 32 are cpu exceptions
+    write_port(PIC_MASTER_MASK, 0x21);
+    write_port(PIC_SLAVE_MASK, 0x28);
+
+    // ICW3 - setup cascading
+    write_port(PIC_MASTER_MASK, 0x00);
+    write_port(PIC_SLAVE_MASK, 0x00);
+
+    // ICW4 - environment info
+    write_port(PIC_MASTER_MASK, 0x01);
+    write_port(PIC_SLAVE_MASK, 0x01);
+
+    // mask interrupts
+    write_port(PIC_MASTER_MASK, 0xff);
+    write_port(PIC_SLAVE_MASK, 0xff);
+
+    idt_load((uint32_t) & idtp);
+}
+\end{lstlisting}
+
+\subsection{Windows Interrupts}
+The Windows Internals book incorrectly refers to the Interrupt Descriptor Table as the Interrupt Dispatch Table, which contravenes the Intel Manual. The Windows Kernel has several important interrupt service routines. The \texttt{KiInterrupDispatchNoLock} is triggered for interrupts which don't acquire kernel spinlocks. The \texttt{KiInterruptDispatchNoEOI} interrupt service routine is used for interrupts which do not need to signal to the APIC that the kernel has completed the interrupt service routine. The \texttt{KiInterruptDispatchLBControl} routine is used on CPUs which support the Last Branch Control Model Specific Register. Certain interrupts which deal with graphics may require saving the state of the floating point registers. These interrupts are dispatched from the \texttt{KiFloatingDispatch} ISR. In order to enable or disable an ISR, the kernel uses the \texttt{IoConnectIntteruptEx} and \texttt{IoDisconnectIntteruptEx} respectively. This is somewhat analogous to how the Kernel of Truth uses the \texttt{idt\_set\_gate} function to install interrupt handlers.
+
+Unlike the Kernel of Truth, Windows allows multiple drivers to share the same interrupt number.
+
+Windows has a concept of Deferred Procedure Call Interrupts which can be used to trigger a scheduling change when it is in the middle of other work. DPC interrupts can also be used to defer important work for later to allow the system to continue to service other interrupts. This is analogous to Linux's work queues. When the kernel switches from processing Interrupt Requests levels it will check to see if any DPC interrupts at the current level need to be processed. It will proceed to drain the DPC queue and process all of the interrupts in turn.
+
+Windows also has Asynchronous Procedure Call Interrupts which allow programs to execute using a different thread's context. Obviously this could be used to subvert another process, so only kernel threads and user threads with special permissions are allowed to make APC Interrupts. User threads need permission from the target thread. To prevent APCs from occurring while processing critical code, such as holding a lock, programs can use the functions called \texttt{KeEnterCriticalRegion} and \texttt{KeEnterGuardedRegion}\cite{2_russinovich_solomon_ionescu_2012}.
+
+\section{Conclusion}
+Interrupts are a crucial way for software to interact with hardware. They can be used to read or send data to hardware device drivers, or as a method of changing privilege levels or even for software flow control. Each driver has to register its own interrupts. In order for other important interrupts to be serviced quickly, production operating systems have mechanisms in place to defer work until more appropriate times.
+
+
+
+\clearpage
+\printbibliography
+
+\clearpage
+
+\begin{appendices}
+
+
+\end{appendices}
+\end{document}
+\bibliography{bib.bib}
+\bibliographystyle{IEEEtran}
