@@ -59,9 +59,6 @@
 
     \vfill
 
-% Bottom of the page
-    {\large \today\par}
-\end{titlepage}
 
 
 \author{\IEEEauthorblockN{Ian Kronquist}
@@ -72,17 +69,38 @@ kronquii@oregonstate.edu}}
 
 
 \begin{abstract}
-The goal of this project was to build an encrypted RAM Disk device driver in the form of a .
+The goal of this project was to build an encrypted RAM Disk device driver in the form of a dynamically loadable Linux Kernel Module. We will use the Linux cryptography APIs as well as the block device driver API.
 \end{abstract}
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
 
 \bigskip
 \bigskip
 \bigskip
 
 \section{What's the Point?}
+The point of this project is to learn about how to write a very simple Linux kernel module as well as to develop our skills reading and understanding poorly documented C code. The project will also teach the difference between character and block devices and the basics of the Linux device driver model.
 \section{Design}
+This project will be a Linux kernel module. The key, device major number, and device logical block size will all be parameters which should be modified when the module is initialized, but should not change afterward. Fortunately this is the behavior of Kernel module parameters.
 
-\lstset{language=C,caption={Initial Approach Using ECB Mode},label=ebd\_transfer}
+\lstset{language=C,caption={Module Parameters},label=getRandomNumber}
+\begin{lstlisting}
+static int major_num = 0;
+module_param(major_num, int, 0);
+static int logical_block_size = 512;
+module_param(logical_block_size, int, 0);
+static int num_sectors = 1024;
+module_param(num_sectors, int, 0);
+static char *key = "0123456789abcdef0123456789abcdef";
+module_param(key, charp, 0400);
+\end{lstlisting}
+
+
+The device has an initialization method which allocates memory for the device, as well as a cryptography TFM structure and sets up the queue of block requests and sets the cryptographic key from the module parameter. Periodically, the block queue dispatches requests to the \texttt{ebd\_request} function. This function iterates through the request linked list provided by the block device and then dispatches read and write commands to the \texttt{ebd\_transfer} function. This function takes a buffer and a flag. If the flag is set to read, it reads the requested blocks off of the device, decrypts them, and then writes them to the buffer. If the flag is set to write, it takes the bytes from the buffer, splits them into blocks, encrypts them, and writes them to the device's memory. This amounts to using ECB mode encryption for the block cipher, which means that each block is encrypted independently. The disadvantage of this encryption mode is that if two blocks with the same data are encrypted they look the same after encryption. This makes the cipher vulnerable to what is known as a chosen plaintext attack. Unfortunately, I have been busy and did not have time to implement CTR mode.
+
+\lstset{language=C,caption={Approach Using ECB Mode},label=getRandomNumber}
 \begin{lstlisting}
 static void ebd_transfer(struct ebd_device *dev, sector_t sector,
         unsigned long sector_num, char *buffer, int write) {
@@ -111,12 +129,74 @@ static void ebd_transfer(struct ebd_device *dev, sector_t sector,
 \end{lstlisting}
 
 
+\lstset{language=C,caption={Global Structure for the ebd0 Device},label=getRandomNumber}
+\begin{lstlisting}
+// A global structure representing the ebd0 device.
+static struct ebd_device {
+    unsigned long size;                 // Size in bytes of the device.
+    spinlock_t lock;                    // A spinlock to control access.
+    u8 *data;                           // The device data.
+    // I may remove this.
+    u8 key[KEY_SIZE];                   // The AES key for encrypting the data.
+    struct crypto_cipher *blkcipher; // Kernel CryptoAPI AES block cipher.
+    struct scatterlist sg[2];           // Data structure used for encryption.
+    struct gendisk *gd;                 // Generic disk structure.
+} Device;
+\end{lstlisting}
 
-\subsection{Block Cipher Modes}
+
 \section{What I learned}
-In this project I learned how to write a block device driver for Linux and how to use the kernel's Cryptography API. I also learned about major and minor device numbers. This assignment also lead me to review the difference between ECB mode and CBC mode block ciphers. I also practiced using ctags and reading through interesting sections of the Linux source code and the scanty applicable documentation. I learned how to set module parameters.
+In this project I learned how to write a block device driver for Linux and how to use the kernel's Cryptography API. I also learned about major and minor device numbers. This assignment also lead me to review the difference between ECB , CBC, and CTR mode block ciphers. I also practiced using ctags and reading through interesting sections of the Linux source code and the scanty applicable documentation. I learned how to set module parameters.
 
 \section{Testing}
+To test my device driver I wrote a bash script. It automates inserting the module, erasing it, making a filesystem, mounting the device, writing a file, and tests reading the file and removing the kernel module. It also prints pretty colors and returns an exit code indicating whether the test succeeded. Additionally, I used \texttt{grep} to search through \texttt{/dev/mem} to ensure that the string from the file occurs nowhere in memory, but grep had trouble searching through all of the devices memory.
+
+\lstset{language=bash,caption={Test Script},label=foo}
+\begin{lstlisting}
+#!/bin/sh
+
+TEST_PATH=/tmp/ebdtest/
+EXIT_CODE=0
+
+assert_success () {
+	echo $@
+	\$@
+	code=$?
+	if [ $code -eq 0 ] ; then
+		echo -e "\e[32mTest passed!\e[00m"
+	else
+		echo $code
+		EXIT_CODE=$code
+		echo -e "\e[31mTest failed!\e[00m"
+	fi
+}
+
+assert_failure () {
+	echo $@
+	\$@
+	code=$?
+	if [ $code -eq 0 ] ; then
+		EXIT_CODE=$code
+		echo -e "\e[31mTest failed!\e[00m"
+	else
+		echo -e "\e[32mTest passed!\e[00m"
+	fi
+}
+
+rm -rf $TEST_PATH
+mkdir $TEST_PATH
+assert_success insmod ebd.ko
+shred /dev/ebd0
+assert_success mkfs.ext2 /dev/ebd0
+assert_success mount /dev/ebd0 $TEST_PATH
+echo 'hello encryption!' > $TEST_PATH/hello
+assert_failure grep -a 'hello' /dev/ebd0
+cat $TEST_PATH/hello
+assert_success umount $TEST_PATH
+assert_success rmmod ebd.ko
+rm -rf $TEST_PATH
+exit $EXIT_CODE
+\end{lstlisting}
 
 \section{Work Log}
 \begin{tabular}{|p{5cm}|p{5cm}|p{5cm}}

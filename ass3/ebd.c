@@ -15,15 +15,15 @@
 */
 
 
-// Define runtime configurable module parameters.
+// Define loadtime configurable module parameters.
 static int major_num = 0;
 module_param(major_num, int, 0);
 static int logical_block_size = 512;
 module_param(logical_block_size, int, 0);
 static int num_sectors = 1024;
 module_param(num_sectors, int, 0);
-static u8 key[32] = "0123456789abcdef0123456789abcdef";
-module_param(key, char*, 0400);
+static char *key = "0123456789abcdef0123456789abcdef";
+module_param(key, charp, 0400);
 // Create global queue for servicing requests.
 static struct request_queue *Queue;
 
