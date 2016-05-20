@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,7 +10,7 @@
 #include <semaphore.h>
 
 #define NUM_THREADS 5
-#define MAX_SLEEP 2
+#define MAX_SLEEP 4
 
 pthread_t Thread_Pool[NUM_THREADS];
 char *names[NUM_THREADS] = {
@@ -27,11 +28,13 @@ char *names[NUM_THREADS] = {
  * empty basket. Each person who enters the bathroom takes a key. When they
  * leave the bathroom they put it in the basket. The third person to leave the
  * bathroom puts the other two keys back on the hook along with their own.
+ * Note that only one person can put their key in the basket at a time.
  */
 
 struct resource {
-    semt_t hook;
-    semt_t basket;
+    sem_t hook;
+    pthread_mutex_t basket_lock;
+    sem_t basket;
 } Resource;
 
 // Time it takes to use the resource.
@@ -52,37 +55,41 @@ void get_resource(char *name) {
     sleep(sleep_time());
     // Do bookkeeping. If this is the third person leaving the bathroom, take
     // all the keys out of the basket and put them on the hook.
+    pthread_mutex_lock(&Resource.basket_lock);
     int val;
     if (sem_getvalue(&Resource.basket, &val) != 0) {
         perror("Counting keys in basket");
         exit(errno);
     }
-    if (val == 2) {
-        printf("%s: Oh, I guess I'm the last person to leave."
+    if (val == 0) {
+        printf("%s: Oh, I guess I'm the last person to leave. "
                "Better put all the keys back where they belong.\n", name);
-        // Take first key out of basket.
-        sem_put(&Resource.basket);
-        // Take second key out of basket.
-        sem_put(&Resource.basket);
-
         // Put my key on the hook.
-        sem_put(&Resource.hook);
+        sem_post(&Resource.hook);
         // Put the first key on the hook.
-        sem_put(&Resource.hook);
+        sem_post(&Resource.hook);
         // Put the second key on the hook.
-        sem_put(&Resource.hook);
+        sem_post(&Resource.hook);
+
+        // Take first key out of basket.
+        sem_post(&Resource.basket);
+        // Take second key out of basket.
+        sem_post(&Resource.basket);
+
+        pthread_mutex_unlock(&Resource.basket_lock);
         // Go back to reading the paper and listening to smooth jazz.
         // Here:
         // http://www.jazzradio.com/smoothjazz247
         // http://www.nytimes.com/
         return;
     }
-    printf("%s: I'll just put my key in the basket\n", name);
+    printf("%s: I'll just put my key in the basket.\n", name);
     // Put key back in the basket
     if (sem_wait(&Resource.basket) != 0) {
         perror("Putting key in basket");
         exit(errno);
     }
+    pthread_mutex_unlock(&Resource.basket_lock);
 }
 
 // Workers spin, use the resource, and sleep.
@@ -100,13 +107,14 @@ void *thread_work(void *idp) {
 
 void spawn_threads(void) {
     for (intptr_t i = 0; i < NUM_THREADS; ++i) {
-        pthread_create(Thread_Pool[i], NULL, thread_work, (void*)i);
+        pthread_create(&Thread_Pool[i], NULL, thread_work, (void*)i);
     }
 }
 
 int main() {
     // Seed random number generator with the time, because it's easy.
     srand(time(NULL));
+    pthread_mutex_init(&Resource.basket_lock, NULL);
     // Initialize the key and hook semaphores.
     if (sem_init(&Resource.hook, 0, 3) == -1) {
         perror("Initializing hook");
