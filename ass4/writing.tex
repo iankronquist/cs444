@@ -1,0 +1,91 @@
+\documentclass[10pt,conference,draftclsnofoot,onecolumn]{IEEEtran}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{color}
+\usepackage{anysize}
+\usepackage{hyperref}
+\usepackage[backend=bibtex]{biblatex}
+\usepackage{amsmath}
+\marginsize{2cm}{2cm}{2cm}{2cm}
+\addbibresource{bib.bib}
+
+\lstdefinelanguage
+   [x86Extended]{Assembler}     % add an "x86Extended dialect of Assembler
+   [x86masm]{Assembler}         % based on the "x86masm" dialect
+   % Define new keywords
+   {morekeywords={rdrand, cpuid}}
+
+\lstdefinestyle{customc}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{OliveGreen},
+  commentstyle=\itshape\color{Fuchsia},
+  identifierstyle=\color{black},
+  stringstyle=\color{Bittersweet},
+}
+
+\lstdefinestyle{customasm}{
+  belowcaptionskip=1\baselineskip,
+  frame=L,
+  xleftmargin=\parindent,
+  language=[x86masm]Assembler,
+  basicstyle=\footnotesize\ttfamily,
+  commentstyle=\itshape\color{Fuchsia},
+}
+
+\lstset{escapechar=@,style=customc}
+
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    {\scshape\LARGE Oregon State University \par}
+    \vspace{1cm}
+    {\scshape\Large Project 4: The SLOB SLAB \par}
+    \vspace{2cm}
+    {\Large\itshape Ian Kronquist \par}
+    \vfill
+    \par
+    Professor~Kevin \textsc{McGrath}
+
+    \vfill
+
+% Bottom of the page
+    {\large \today\par}
+\end{titlepage}
+
+
+\author{\IEEEauthorblockN{Ian Kronquist}
+\IEEEauthorblockA{School of Electrical and\\Computer Science\\
+Oregon State University\\
+Corvallis, Oregon\\
+kronquii@oregonstate.edu}}
+
+\bigskip
+
+\section{Design Plan}
+The algorithm for this assignment is relatively straightforward: traverse the list of blocks and find the size closest to the size of the allocation. Without further optimizations, this is by definition a $\Theta(n)$ operation. One simple optimization is that if there is a free block exactly the same size as the allocation, choose that block and stop searching.
+
+The assignment requires that the first fit algorithm be implemented in \texttt{mm/slob.c}. In that file the \texttt{slob\_alloc} function iterates through the pages and finds the first page with enough room for the new allocation. This can be changed to search through all of the pages and store the page with the best fit found so far. After searching through all of the pages, the actual allocation can take place.
+
+One way to make this process more efficient is to use a binary search tree like a Red-Black Tree instead of a simple list of blocks. The search time for the best match in an rb-tree is $\Theta(log(n))$, which is far superior to $\Theta(n)$.
+
+\clearpage
+\printbibliography
+
+\clearpage
+
+\begin{appendices}
+
+
+\end{appendices}
+\end{document}
+\bibliography{bib.bib}
+\bibliographystyle{IEEEtran}
