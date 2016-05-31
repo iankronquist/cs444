@@ -1,0 +1,276 @@
+From 785941b296a26fe6d96de0a08f4f074863da8df6 Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Tue, 31 May 2016 13:32:42 -0700
+Subject: [PATCH 1/2] Assignment 4, including extra credit
+
+---
+ arch/x86/syscalls/syscall_32.tbl |   1 +
+ arch/x86/syscalls/syscalltbl.sh  |   4 +-
+ include/linux/mm_types.h         |   1 +
+ init/Kconfig                     |   1 -
+ mm/slob.c                        | 111 ++++++++++++++++++++++++++++++++++-----
+ 5 files changed, 102 insertions(+), 16 deletions(-)
+
+diff --git a/arch/x86/syscalls/syscall_32.tbl b/arch/x86/syscalls/syscall_32.tbl
+index 96bc506..b31e274 100644
+--- a/arch/x86/syscalls/syscall_32.tbl
++++ b/arch/x86/syscalls/syscall_32.tbl
+@@ -359,3 +359,4 @@
+ 350	i386	finit_module		sys_finit_module
+ 351	i386	sched_setattr		sys_sched_setattr
+ 352	i386	sched_getattr		sys_sched_getattr
++353	i386	mem_usage		sys_mem_usage
+diff --git a/arch/x86/syscalls/syscalltbl.sh b/arch/x86/syscalls/syscalltbl.sh
+index 0e7f8ec..131a976 100644
+--- a/arch/x86/syscalls/syscalltbl.sh
++++ b/arch/x86/syscalls/syscalltbl.sh
+@@ -2,14 +2,16 @@
+ 
+ in="$1"
+ out="$2"
+-
++echo '-----------------------------------------------------------------' >&2
+ grep '^[0-9]' "$in" | sort -n | (
+     while read nr abi name entry compat; do
+ 	abi=`echo "$abi" | tr '[a-z]' '[A-Z]'`
+ 	if [ -n "$compat" ]; then
+ 	    echo "__SYSCALL_${abi}($nr, $entry, $compat)"
++	    echo "__SYSCALL_${abi}($nr, $entry, $compat)" >&2
+ 	elif [ -n "$entry" ]; then
+ 	    echo "__SYSCALL_${abi}($nr, $entry, $entry)"
++	    echo "__SYSCALL_${abi}($nr, $entry, $entry)" >&2
+ 	fi
+     done
+ ) > "$out"
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 2b58d19..3f77611 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -114,6 +114,7 @@ struct page {
+ 					};
+ 					int units;	/* SLOB */
+ 				};
++				struct rb_node node; /* SLOB */
+ 				atomic_t _count;		/* Usage count, see below. */
+ 			};
+ 			unsigned int active;	/* SLAB */
+diff --git a/init/Kconfig b/init/Kconfig
+index 8b9521a..4f72e53 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1580,7 +1580,6 @@ config SLUB
+ 	   a slab allocator.
+ 
+ config SLOB
+-	depends on EXPERT
+ 	bool "SLOB (Simple Allocator)"
+ 	help
+ 	   SLOB replaces the stock allocator with a drastically simpler
+diff --git a/mm/slob.c b/mm/slob.c
+index 4bf8809..7e7a5fc 100644
+--- a/mm/slob.c
++++ b/mm/slob.c
+@@ -57,6 +57,9 @@
+  */
+ 
+ #include <linux/kernel.h>
++#include <linux/syscalls.h>
++#include <linux/rbtree.h>
++#include <linux/rbtree_augmented.h> /* RB_BLACK */
+ #include <linux/slab.h>
+ 
+ #include <linux/mm.h>
+@@ -100,6 +103,57 @@ typedef struct slob_block slob_t;
+ static LIST_HEAD(free_slob_small);
+ static LIST_HEAD(free_slob_medium);
+ static LIST_HEAD(free_slob_large);
++static struct rb_root root = RB_ROOT;
++
++// Thank you Greg KH for your LWN article: https://lwn.net/Articles/184495/
++static void rb_insert(struct rb_root *root, struct page *rq)
++{
++	struct rb_node **p = &root->rb_node;
++	struct rb_node *parent = NULL;
++	struct page *__rq;
++
++	while (*p) {
++		parent = *p;
++		__rq = rb_entry(parent, struct page, node);
++
++		if (rq->units < __rq->units)
++			p = &(*p)->rb_left;
++		else if (rq->units >= __rq->units)
++			p = &(*p)->rb_right;
++	}
++	rb_link_node(&rq->node, parent, p);
++	rb_insert_color(&rq->node, root);
++}
++
++static struct page *rb_closest(struct rb_root *root, struct page *sp) {
++	struct rb_node *node = root->rb_node;
++	struct page *closest = NULL, *p;
++	int closest_units_diff = INT_MAX;
++	int units = sp->units;
++	while (node) {
++		p = rb_entry(node, struct page, node);
++		if (units < p->units) {
++			node = node->rb_right;
++			if (p->units - units < closest_units_diff) {
++				closest = p;
++				closest_units_diff = p->units - units;
++			}
++		} else if (units > p->units) {
++			node = node->rb_left;
++			if (units - p->units < closest_units_diff) {
++				closest = p;
++				closest_units_diff = units - p->units;
++			}
++		} else {
++			closest =  p;
++			break;
++		}
++	}
++	if (closest == NULL || closest->units < units) {
++		return NULL;
++	}
++	return closest;
++}
+ 
+ /*
+  * slob_page_free: true for pages on free_slob_pages list.
+@@ -112,12 +166,14 @@ static inline int slob_page_free(struct page *sp)
+ static void set_slob_page_free(struct page *sp, struct list_head *list)
+ {
+ 	list_add(&sp->list, list);
++	rb_insert(&root, sp);
+ 	__SetPageSlobFree(sp);
+ }
+ 
+ static inline void clear_slob_page_free(struct page *sp)
+ {
+ 	list_del(&sp->list);
++	rb_erase(&sp->node, &root);
+ 	__ClearPageSlobFree(sp);
+ }
+ 
+@@ -267,8 +323,7 @@ static void *slob_page_alloc(struct page *sp, size_t size, int align)
+  */
+ static void *slob_alloc(size_t size, gfp_t gfp, int align, int node)
+ {
+-	struct page *sp;
+-	struct list_head *prev;
++	struct page *sp, *best = NULL, *rb_best;
+ 	struct list_head *slob_list;
+ 	slob_t *b = NULL;
+ 	unsigned long flags;
+@@ -281,6 +336,10 @@ static void *slob_alloc(size_t size, gfp_t gfp, int align, int node)
+ 		slob_list = &free_slob_large;
+ 
+ 	spin_lock_irqsave(&slob_lock, flags);
++	sp = list_first_entry(slob_list, typeof(*sp), list);
++	best = rb_closest(&root, sp);
++	if (best != NULL)
++		goto alloc;
+ 	/* Iterate through each partially free page, try to find room */
+ 	list_for_each_entry(sp, slob_list, list) {
+ #ifdef CONFIG_NUMA
+@@ -295,20 +354,23 @@ static void *slob_alloc(size_t size, gfp_t gfp, int align, int node)
+ 		if (sp->units < SLOB_UNITS(size))
+ 			continue;
+ 
+-		/* Attempt to alloc */
+-		prev = sp->list.prev;
+-		b = slob_page_alloc(sp, size, align);
+-		if (!b)
++		if (best == NULL) {
++			best = sp;
+ 			continue;
+-
+-		/* Improve fragment distribution and reduce our average
+-		 * search time by starting our next search here. (see
+-		 * Knuth vol 1, sec 2.5, pg 449) */
+-		if (prev != slob_list->prev &&
+-				slob_list->next != prev->next)
+-			list_move_tail(slob_list, prev->next);
+-		break;
++		}
++		if (sp->units < best->units)
++			best = sp;
++		// Can't do better than equality
++		if (sp->units == best->units) {
++			best = sp;
++			break;
++		}
+ 	}
++	if (best != NULL) {
++alloc:
++		b = slob_page_alloc(best, size, align);
++	}
++
+ 	spin_unlock_irqrestore(&slob_lock, flags);
+ 
+ 	/* Not enough space: must allocate a new page */
+@@ -334,6 +396,27 @@ static void *slob_alloc(size_t size, gfp_t gfp, int align, int node)
+ 	return b;
+ }
+ 
++SYSCALL_DEFINE0(mem_usage)
++{
++	struct page *sp;
++	unsigned long flags;
++	int length = 0;
++
++	spin_lock_irqsave(&slob_lock, flags);
++	list_for_each_entry(sp, &free_slob_small, list) {
++		length += sp->units;
++	}
++	list_for_each_entry(sp, &free_slob_medium, list) {
++		length += sp->units;
++	}
++	list_for_each_entry(sp, &free_slob_large, list) {
++		length += sp->units;
++	}
++	spin_unlock_irqrestore(&slob_lock, flags);
++	return length;
++}
++
++
+ /*
+  * slob_free: entry point into the slob allocator.
+  */
+-- 
+1.7.12.4
+
+
+From 82138161eb4f617f24e40f211cd0e0470bcab3f0 Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Tue, 31 May 2016 13:33:02 -0700
+Subject: [PATCH 2/2] Simple test C program which calls new syscall
+
+---
+ test.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+ create mode 100644 test.c
+
+diff --git a/test.c b/test.c
+new file mode 100644
+index 0000000..ccd3f4f
+--- /dev/null
++++ b/test.c
+@@ -0,0 +1,13 @@
++#include <stdio.h>
++
++#include <sys/syscall.h>
++
++#ifndef __NR_mem_usage
++#define __NR_mem_usage 353
++#endif
++
++int main() {
++	int result = syscall(__NR_mem_usage);
++	printf("%d\n", result);
++	return result;
++}
+-- 
+1.7.12.4
+
