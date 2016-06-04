@@ -1,7 +1,7 @@
 From 785941b296a26fe6d96de0a08f4f074863da8df6 Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Tue, 31 May 2016 13:32:42 -0700
-Subject: [PATCH 1/2] Assignment 4, including extra credit
+Subject: [PATCH 1/3] Assignment 4, including extra credit
 
 ---
  arch/x86/syscalls/syscall_32.tbl |   1 +
@@ -245,7 +245,7 @@ index 4bf8809..7e7a5fc 100644
 From 82138161eb4f617f24e40f211cd0e0470bcab3f0 Mon Sep 17 00:00:00 2001
 From: Ian Kronquist <iankronquist@gmail.com>
 Date: Tue, 31 May 2016 13:33:02 -0700
-Subject: [PATCH 2/2] Simple test C program which calls new syscall
+Subject: [PATCH 2/3] Simple test C program which calls new syscall
 
 ---
  test.c | 13 +++++++++++++
@@ -271,6 +271,267 @@ index 0000000..ccd3f4f
 +	printf("%d\n", result);
 +	return result;
 +}
+-- 
+1.7.12.4
+
+
+From 9f71220fc80dd75b579b48b28f52ff9433b3d3ad Mon Sep 17 00:00:00 2001
+From: Ian Kronquist <iankronquist@gmail.com>
+Date: Fri, 3 Jun 2016 20:08:59 -0700
+Subject: [PATCH 3/3] slob_t first fit algorithm
+
+---
+ arch/x86/syscalls/syscall_32.tbl |   1 +
+ mm/slob.c                        | 119 +++++++++++++++++++++++----------------
+ test.c                           |  32 +++++++++--
+ 3 files changed, 101 insertions(+), 51 deletions(-)
+
+diff --git a/arch/x86/syscalls/syscall_32.tbl b/arch/x86/syscalls/syscall_32.tbl
+index b31e274..643911b 100644
+--- a/arch/x86/syscalls/syscall_32.tbl
++++ b/arch/x86/syscalls/syscall_32.tbl
+@@ -360,3 +360,4 @@
+ 351	i386	sched_setattr		sys_sched_setattr
+ 352	i386	sched_getattr		sys_sched_getattr
+ 353	i386	mem_usage		sys_mem_usage
++354	i386	mem_size		sys_mem_size
+diff --git a/mm/slob.c b/mm/slob.c
+index 7e7a5fc..d4cc8e6 100644
+--- a/mm/slob.c
++++ b/mm/slob.c
+@@ -86,12 +86,18 @@
+  */
+ #if PAGE_SIZE <= (32767 * 2)
+ typedef s16 slobidx_t;
++#define SLOB_MAX SHRT_MAX
+ #else
+ typedef s32 slobidx_t;
++#define SLOB_MAX INT_MAX
+ #endif
+ 
++static unsigned long slob_heap_size;
++static unsigned long slob_heap_used;
++
+ struct slob_block {
+ 	slobidx_t units;
++	struct rb_node *node;
+ };
+ typedef struct slob_block slob_t;
+ 
+@@ -256,7 +262,7 @@ static void *slob_new_pages(gfp_t gfp, int order, int node)
+ 
+ 	if (!page)
+ 		return NULL;
+-
++	slob_heap_size += PAGE_SIZE;
+ 	return page_address(page);
+ }
+ 
+@@ -264,6 +270,7 @@ static void slob_free_pages(void *b, int order)
+ {
+ 	if (current->reclaim_state)
+ 		current->reclaim_state->reclaimed_slab += 1 << order;
++	slob_heap_size -= PAGE_SIZE;
+ 	free_pages((unsigned long)b, order);
+ }
+ 
+@@ -274,48 +281,75 @@ static void *slob_page_alloc(struct page *sp, size_t size, int align)
+ {
+ 	slob_t *prev, *cur, *aligned = NULL;
+ 	int delta = 0, units = SLOB_UNITS(size);
++	int best_delta = 0;
++	slob_t *next, *best = NULL, *best_prev, *best_aligned;
++	slobidx_t best_avail = SLOB_MAX, avail;
+ 
+ 	for (prev = NULL, cur = sp->freelist; ; prev = cur, cur = slob_next(cur)) {
+-		slobidx_t avail = slob_units(cur);
++		avail = slob_units(cur);
+ 
+ 		if (align) {
+ 			aligned = (slob_t *)ALIGN((unsigned long)cur, align);
+ 			delta = aligned - cur;
+ 		}
+ 		if (avail >= units + delta) { /* room enough? */
+-			slob_t *next;
+-
+-			if (delta) { /* need to fragment head to align? */
+-				next = slob_next(cur);
+-				set_slob(aligned, avail - delta, next);
+-				set_slob(cur, delta, aligned);
+-				prev = cur;
+-				cur = aligned;
+-				avail = slob_units(cur);
+-			}
+-
+-			next = slob_next(cur);
+-			if (avail == units) { /* exact fit? unlink. */
+-				if (prev)
+-					set_slob(prev, slob_units(prev), next);
+-				else
+-					sp->freelist = next;
+-			} else { /* fragment */
+-				if (prev)
+-					set_slob(prev, slob_units(prev), cur + units);
+-				else
+-					sp->freelist = cur + units;
+-				set_slob(cur + units, avail - units, next);
++			if (avail - (units + delta) == 0) {
++				// pick it
++				best_delta = delta;
++				best_avail = avail;
++				best = cur;
++				best_aligned = aligned;
++				best_prev = prev;
++				break;
++			} else if (avail - (units + delta) <=
++					best_avail - (units + best_delta)) {
++				best_delta = delta;
++				best_avail = avail;
++				best = cur;
++				best_aligned = aligned;
++				best_prev = prev;
+ 			}
+-
+-			sp->units -= units;
+-			if (!sp->units)
+-				clear_slob_page_free(sp);
+-			return cur;
+ 		}
+ 		if (slob_last(cur))
+-			return NULL;
++			break;
++	}
++	if (best == NULL) {
++		return NULL;
++	}
++	cur = best;
++	prev = best_prev;
++	avail = best_avail;
++	delta = best_delta;
++	aligned = best_aligned;
++
++	if (delta) { /* need to fragment head to align? */
++		next = slob_next(cur);
++		set_slob(aligned, avail - delta, next);
++		set_slob(cur, delta, aligned);
++		prev = cur;
++		cur = aligned;
++		avail = slob_units(cur);
++	}
++
++	next = slob_next(cur);
++	if (avail == units) { /* exact fit? unlink. */
++		if (prev)
++			set_slob(prev, slob_units(prev), next);
++		else
++			sp->freelist = next;
++	} else { /* fragment */
++		if (prev)
++			set_slob(prev, slob_units(prev), cur + units);
++		else
++			sp->freelist = cur + units;
++		set_slob(cur + units, avail - units, next);
+ 	}
++
++	sp->units -= units;
++	if (!sp->units)
++		clear_slob_page_free(sp);
++	slob_heap_used += units;
++	return cur;
+ }
+ 
+ /*
+@@ -323,7 +357,7 @@ static void *slob_page_alloc(struct page *sp, size_t size, int align)
+  */
+ static void *slob_alloc(size_t size, gfp_t gfp, int align, int node)
+ {
+-	struct page *sp, *best = NULL, *rb_best;
++	struct page *sp, *best = NULL;
+ 	struct list_head *slob_list;
+ 	slob_t *b = NULL;
+ 	unsigned long flags;
+@@ -398,22 +432,12 @@ alloc:
+ 
+ SYSCALL_DEFINE0(mem_usage)
+ {
+-	struct page *sp;
+-	unsigned long flags;
+-	int length = 0;
++	return slob_heap_used;
++}
+ 
+-	spin_lock_irqsave(&slob_lock, flags);
+-	list_for_each_entry(sp, &free_slob_small, list) {
+-		length += sp->units;
+-	}
+-	list_for_each_entry(sp, &free_slob_medium, list) {
+-		length += sp->units;
+-	}
+-	list_for_each_entry(sp, &free_slob_large, list) {
+-		length += sp->units;
+-	}
+-	spin_unlock_irqrestore(&slob_lock, flags);
+-	return length;
++SYSCALL_DEFINE0(mem_size)
++{
++	return slob_heap_size;
+ }
+ 
+ 
+@@ -470,6 +494,7 @@ static void slob_free(void *block, int size)
+ 	 * point.
+ 	 */
+ 	sp->units += units;
++	slob_heap_used -= units;
+ 
+ 	if (b < (slob_t *)sp->freelist) {
+ 		if (b + units == sp->freelist) {
+diff --git a/test.c b/test.c
+index ccd3f4f..15e281a 100644
+--- a/test.c
++++ b/test.c
+@@ -1,13 +1,37 @@
++#include <assert.h>
+ #include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++#include <unistd.h>
+ 
+ #include <sys/syscall.h>
+ 
+ #ifndef __NR_mem_usage
+ #define __NR_mem_usage 353
+ #endif
++#ifndef __NR_mem_size
++#define __NR_mem_size 354
++#endif
+ 
+-int main() {
+-	int result = syscall(__NR_mem_usage);
+-	printf("%d\n", result);
+-	return result;
++int main(int argc, char **argv) {
++	FILE *f;
++	long num_secs, usage, total, i;
++	time_t now, start;
++	if (argc != 3) {
++		fprintf(stderr, "Usage: %s <file> <seconds>\n", argv[0]);
++		exit(EXIT_FAILURE);
++	}
++	f = fopen(argv[1], "w");
++	assert(f != NULL);
++	num_secs = strtol(argv[2], NULL, 10);
++	start = time(NULL);
++	for (i = 0; i < num_secs; ++i) {
++		usage = syscall(__NR_mem_usage);
++		total = syscall(__NR_mem_size);
++		now = time(NULL);
++		fprintf(f, "%lu, %lu\n", now, 1-usage/total);
++		sleep(1);
++	}
++	fclose(f);
++	return 0;
+ }
 -- 
 1.7.12.4
 
