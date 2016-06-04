@@ -139,10 +139,39 @@ We create two separate syscalls. Returns the current size of the heap, and the o
 \section{Personal Approach}
 My approach was two fold. First we find the page which best fits the allocation by walking the rb-tree. Then we go ahead and inspect all of the blocks in the page and chooses the one which has the best fit. This two fold approach is an effective optimization which allows the allocator to run far faster than the naive approach of searching every single slob block in every single page.
 
+Additionally, I wrote a program which calculates the internal fragmentation of the heap. It uses both of the syscalls I defined and writes the output to the user specified CSV file. It takes two arguments, the name of the CSV file and the number of seconds to run. Every second it records the usage to the file.
+\lstset{language=C,caption={Syscalls example},label=getRandomNumber}
+\begin{lstlisting}
+int main(int argc, char **argv) {
+	FILE *f;
+	long num_secs, usage, total, i;
+	double result;
+	time_t now, start;
+	if (argc != 3) {
+		fprintf(stderr, "Usage: %s <file> <seconds>\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
+	f = fopen(argv[1], "w");
+	assert(f != NULL);
+	num_secs = strtol(argv[2], NULL, 10);
+	start = time(NULL);
+	for (i = 0; i < num_secs; ++i) {
+		usage = syscall(__NR_mem_usage);
+		total = syscall(__NR_mem_size);
+		result = 1.0 - (double)usage/(double)total;
+		now = time(NULL) - start;
+		fprintf(f, "%lu, %f\n", now, result);
+		sleep(1);
+	}
+	fclose(f);
+	return 0;
+}
+\end{lstlisting}
+
 \section{Testing}
 I wrote a simple kernel module which created many allocations and freed them. This was an effective way to test the allocator. When it's loaded it makes a random number of allocations, up to 10000, of up to 100000 bytes each. This is an effective way to stress test the system.
 
-\lstset{language=C,caption={Approach Using ECB Mode},label=getRandomNumber}
+\lstset{language=C,caption={Stability test},label=getRandomNumber}
 \begin{lstlisting}
 static int __init ff_slob_stability_init(void) {
 	unsigned int times, buf_size, i;
