@@ -70,12 +70,116 @@ kronquii@oregonstate.edu}}
 
 \bigskip
 
+
+\section{What's the Point}
+The point of this project is to learn about the trade offs of the first fit and best fit algorithms, as well as how to debug early init code.
+
 \section{Design Plan}
 The algorithm for this assignment is relatively straightforward: traverse the list of blocks and find the size closest to the size of the allocation. Without further optimizations, this is by definition a $\Theta(n)$ operation. One simple optimization is that if there is a free block exactly the same size as the allocation, choose that block and stop searching.
 
-The assignment requires that the first fit algorithm be implemented in \texttt{mm/slob.c}. In that file the \texttt{slob\_alloc} function iterates through the pages and finds the first page with enough room for the new allocation. This can be changed to search through all of the pages and store the page with the best fit found so far. After searching through all of the pages, the actual allocation can take place.
+The assignment requires that the first fit algorithm be implemented in \texttt{mm/slob.c}. In that file the \texttt{slob\_alloc} function iterates through the pages and finds the first page with enough room for the new allocation. This can be changed to search through all of the pages and store the page with the best fit found so far. After searching through all of the pages, the actual allocation can take place. Next each block in the page is searched for the block which most closely fits the current allocation.
 
-One way to make this process more efficient is to use a binary search tree like a Red-Black Tree instead of a simple list of blocks. The search time for the best match in an rb-tree is $\Theta(log(n))$, which is far superior to $\Theta(n)$.
+One way to make this process more efficient is to use a binary search tree like a Red-Black Tree instead of a simple list of blocks. The search time for the best match in an rb-tree is $\Theta(log(n))$, which is far superior to $\Theta(n)$. I use a red-black tree to find the page, and then use best fit to find the best allocation in the page. This provides a reasonable trade off in speed and memory consumption since most pages don't have that many blocks since most allocations are fairly large.
+
+\lstset{language=C,caption={Approach Using ECB Mode},label=getRandomNumber}
+\begin{lstlisting}
+// Thank you Greg KH for your LWN article: https://lwn.net/Articles/184495/
+static void rb_insert(struct rb_root *root, struct page *rq)
+{
+	struct rb_node **p = &root->rb_node;
+	struct rb_node *parent = NULL;
+	struct page *__rq;
+
+	while (*p) {
+		parent = *p;
+		__rq = rb_entry(parent, struct page, node);
+
+		if (rq->units < __rq->units)
+			p = &(*p)->rb_left;
+		else if (rq->units >= __rq->units)
+			p = &(*p)->rb_right;
+	}
+	rb_link_node(&rq->node, parent, p);
+	rb_insert_color(&rq->node, root);
+}
+
+static struct page *rb_closest(struct rb_root *root, struct page *sp) {
+	struct rb_node *node = root->rb_node;
+	struct page *closest = NULL, *p;
+	int closest_units_diff = INT_MAX;
+	int units = sp->units;
+	while (node) {
+		p = rb_entry(node, struct page, node);
+		if (units < p->units) {
+			node = node->rb_right;
+			if (p->units - units < closest_units_diff) {
+				closest = p;
+				closest_units_diff = p->units - units;
+			}
+		} else if (units > p->units) {
+			node = node->rb_left;
+			if (units - p->units < closest_units_diff) {
+				closest = p;
+				closest_units_diff = units - p->units;
+			}
+		} else {
+			closest =  p;
+			break;
+		}
+	}
+	if (closest == NULL || closest->units < units) {
+		return NULL;
+	}
+	return closest;
+}
+\end{lstlisting}
+
+We create two separate syscalls. Returns the current size of the heap, and the other returns the number of blocks in the heap which have been used. These numbers are calculated at allocation time, that is, when a new page is added to the heap the size of the heap is cached, while when a block is allocated or freed, the current size of used allocations is stored.
+
+\section{Personal Approach}
+My approach was two fold. First we find the page which best fits the allocation by walking the rb-tree. Then we go ahead and inspect all of the blocks in the page and chooses the one which has the best fit. This two fold approach is an effective optimization which allows the allocator to run far faster than the naive approach of searching every single slob block in every single page.
+
+\section{Testing}
+I wrote a simple kernel module which created many allocations and freed them. This was an effective way to test the allocator. When it's loaded it makes a random number of allocations, up to 10000, of up to 100000 bytes each. This is an effective way to stress test the system.
+
+\lstset{language=C,caption={Approach Using ECB Mode},label=getRandomNumber}
+\begin{lstlisting}
+static int __init ff_slob_stability_init(void) {
+	unsigned int times, buf_size, i;
+	void *prev_alloc = NULL, *this_alloc;
+	get_random_bytes(&times, sizeof(times));
+	times %= 10000;
+	printk("Making %u allocations.\n", times);
+	for (i = 0; i < times; ++i) {
+		get_random_bytes(&buf_size, sizeof(buf_size));
+		buf_size %= 100000;
+		this_alloc = kmalloc(buf_size, GFP_KERNEL);
+		kfree(this_alloc);
+	}
+	printk("Done.\n");
+	return 0;
+}
+\end{lstlisting}
+
+\section{Version Control Log}
+\begin{tabular}{|p{5cm}|p{5cm}|p{5cm}}
+    \textbf{Hash} & \textbf{Committer} & \textbf{Time} \\
+    \hline
+9f71220 & Ian Kronquist & Fri Jun 3 20:08:59 2016 -0700 \\
+8213816 & Ian Kronquist & Tue May 31 13:33:02 2016 -0700 \\
+785941b & Ian Kronquist & Tue May 31 13:32:42 2016 -0700 \\
+356a3e1 & Greg Kroah-Hartman & Sat Dec 6 15:56:06 2014 -0800 \\
+\end{tabular}
+
+\section{Work Log}
+\begin{tabular}{|p{5cm}|p{5cm}|p{5cm}}
+    \textbf{Approximate Start Time} & \textbf{Approximate Duration} & \textbf{Activity} \\
+    \hline
+    13:00 Tuesday, May 31 & 1 hours & Start planning and reading. \\
+    12:00 Friday, June 3 & 2 hours & Begin work on the project. Read up on the sample. Start reading Linux kernel source. Write .gitignore files. \\
+    17:35 Friday& 3 hours & Finish the device driver. Read lots of Linux source code. Start working on the write up. \\
+\end{tabular}
+
 
 \clearpage
 \printbibliography
